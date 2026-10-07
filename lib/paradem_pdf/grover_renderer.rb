@@ -57,10 +57,14 @@ module ParademPdf
       @inputs.deep_dup
     end
 
-    def to_pdf
+    attr_reader :root_path
+
+    def to_pdf(browser_endpoint: nil)
       native = Grover.new("")
       native.instance_variable_set(:@root_path, @root_path)
-      native.send(:processor).convert(:pdf, @html, @effective_options.deep_dup)
+      options = @effective_options.deep_dup
+      options["browserWsEndpoint"] = browser_endpoint if browser_endpoint
+      native.send(:processor).convert(:pdf, @html, options)
     end
 
     private

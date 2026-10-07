@@ -149,4 +149,36 @@ class GroverRendererTest < Minitest::Test
     }) { r.to_pdf }
     refute_equal options, renderer.fingerprint_inputs["options"]
   end
+
+  def test_to_pdf_passes_browser_endpoint_to_convert_only
+    endpoint = "ws://127.0.0.1:1/devtools/browser/x"
+    r = renderer
+    convert_using(->(_kind, _html, options, *) {
+      assert_equal endpoint, options["browserWsEndpoint"]
+      "bytes"
+    }) { assert_equal "bytes", r.to_pdf(browser_endpoint: endpoint) }
+  end
+
+  def test_to_pdf_without_endpoint_omits_browser_ws_endpoint
+    r = renderer
+    convert_using(->(_kind, _html, options, *) {
+      refute options.key?("browserWsEndpoint")
+      "bytes"
+    }) { assert_equal "bytes", r.to_pdf }
+  end
+
+  def test_browser_endpoint_never_enters_fingerprint_inputs
+    r = renderer
+    convert_using(->(_kind, _html, _options, *) { "bytes" }) do
+      r.to_pdf(browser_endpoint: "ws://127.0.0.1:1/devtools/browser/x")
+    end
+    inputs = r.fingerprint_inputs
+    refute inputs.key?("browserWsEndpoint")
+    refute inputs["options"].key?("browserWsEndpoint")
+  end
+
+  def test_root_path_reader_returns_resolved_root_path
+    assert_equal Dir.pwd, renderer.root_path
+    assert_equal "/custom/root", renderer(options: {root_path: "/custom/root"}).root_path
+  end
 end
