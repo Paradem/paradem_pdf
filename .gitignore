@@ -2,3 +2,4 @@
 /pkg/
 /*.gem
 .opencode/plans/
+/node_modules
