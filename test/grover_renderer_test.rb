@@ -181,4 +181,39 @@ class GroverRendererTest < Minitest::Test
     assert_equal Dir.pwd, renderer.root_path
     assert_equal "/custom/root", renderer(options: {root_path: "/custom/root"}).root_path
   end
+
+  def test_browser_options_reuse_captured_native_options_without_later_globals
+    @configuration.options = {executable_path: "/global/chrome", launch_args: '["--global"]'}
+    r = renderer(html: '<meta name="grover-launch_timeout" content="4321">')
+    @configuration.options = {executable_path: "/later/chrome"}
+    launch = r.browser_options
+    assert_equal "/global/chrome", launch["executablePath"]
+    assert_equal ["--global"], launch["launchArgs"]
+    assert_equal 4321, launch["launchTimeout"]
+    launch["launchArgs"] << "--changed"
+    assert_equal ["--global"], r.browser_options["launchArgs"]
+  end
+
+  def test_batch_normalization_uses_native_coercion_and_global_root
+    @configuration.options = {root_path: "/global/root", launch_args: '["--global"]', launch_timeout: "1234"}
+    options, root = ParademPdf::GroverRenderer.normalize_browser_options(options: {launch_timeout: "4321"})
+    assert_equal "/global/root", root
+    assert_equal ["--global"], options["launchArgs"]
+    assert_equal 4321, options["launchTimeout"]
+  end
+
+  def test_global_and_metadata_endpoints_are_conversion_only
+    ["global", "metadata"].each do |source|
+      @configuration.options = (source == "global") ? {browser_ws_endpoint: "ws://global"} : {}
+      html = (source == "metadata") ? '<meta name="grover-browser_ws_endpoint" content="ws://metadata"><body>body</body>' : "body"
+      r = renderer(html: html)
+      assert_equal "ws://#{source}", r.browser_endpoint
+      refute_includes r.fingerprint_inputs.to_s, "ws://#{source}"
+      refute r.browser_options.key?("browserWsEndpoint")
+      convert_using(->(_kind, _html, effective, *) {
+        assert_equal "ws://#{source}", effective["browserWsEndpoint"]
+        "bytes"
+      }) { r.to_pdf }
+    end
+  end
 end

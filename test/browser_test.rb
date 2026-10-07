@@ -3,6 +3,14 @@ require "support/browser_fixture"
 require "tmpdir"
 
 class BrowserFixtureGuardTest < Minitest::Test
+  def test_cache_proof_rejects_unexpected_launch_conversion_or_callback
+    before = {conversions: 5, callbacks: 4, launches: 1}
+    before.each_key do |kind|
+      after = before.merge(kind => before.fetch(kind) + 1)
+      assert_raises(RuntimeError) { BrowserFixture.check_delta(before, after, conversions: 0, callbacks: 0, launches: 0) }
+    end
+  end
+
   def test_enabled_fixture_rejects_missing_font_instead_of_skipping
     error = assert_raises(ArgumentError) { BrowserFixture.validate!({}) }
     assert_match(/PARADEM_PDF_TEST_FONT/, error.message)
@@ -54,7 +62,10 @@ class BrowserTest < Minitest::Test
       result = JSON.parse(output.lines.last)
       assert_equal [2, 3], result.fetch("pages")
       assert_equal 12, result.fetch("conversions")
-      assert_equal 2, result.fetch("cleanups")
+      assert_equal 14, result.fetch("per_render_conversions")
+      assert_equal 2, result.fetch("completed_hits")
+      assert_equal 2, result.fetch("warm_bodies")
+      assert_equal 4, result.fetch("cleanups")
       assert_equal 1, result.fetch("batch_cleanups")
     end
   end

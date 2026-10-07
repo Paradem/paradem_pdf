@@ -11,11 +11,24 @@ module ParademPdf
     CLOSE_GRACE = 5
     KILL_GRACE = 2
 
-    def self.open(options:, root_path: nil, timeout: 30)
-      reject_bypass!(options)
-
-      normalized = Grover::Utils.normalize_object(options)
-      args = Array(normalized["launchArgs"])
+    def self.open(options: {}, effective_options: nil, root_path: nil, timeout: 30)
+      timeout = 30 if timeout.nil?
+      unless timeout.is_a?(Numeric) && timeout.real? && timeout.finite? && timeout.positive?
+        raise ArgumentError, "Browser timeout must be finite and positive"
+      end
+      if effective_options
+        normalized = effective_options
+      else
+        normalized, native_root = GroverRenderer.normalize_browser_options(options: options)
+        root_path ||= native_root
+      end
+      reject_bypass!(normalized)
+      launch_timeout = normalized["launchTimeout"]
+      if !launch_timeout.nil? && !(launch_timeout.is_a?(Numeric) && launch_timeout.real? && launch_timeout.finite? && launch_timeout.positive?)
+        raise ArgumentError, "Browser launch_timeout must be finite and positive"
+      end
+      timeout = [timeout, launch_timeout / 1000.0].max if launch_timeout
+      args = normalized.fetch("launchArgs", [])
       headless = normalized.dig("debug", "headless")
       headless = true if headless.nil?
 
@@ -24,7 +37,8 @@ module ParademPdf
         "args" => args,
         "browser" => normalized["browser"],
         "timeout" => normalized["launchTimeout"],
-        "headless" => headless
+        "headless" => headless,
+        "devtools" => normalized.dig("debug", "devtools")
       }.compact
 
       root_path ||= Dir.pwd
@@ -36,11 +50,15 @@ module ParademPdf
         chdir: root_path, pgroup: true
       )
 
-      endpoint = read_endpoint(stdout, timeout)
-      return new(endpoint: endpoint, stdin: stdin, stdout: stdout, wait_thr: wait_thr) if endpoint
-
-      kill_owned(stdin, wait_thr)
-      raise BrowserError, "Browser launcher failed to report a WebSocket endpoint"
+      browser = new(endpoint: nil, stdin: stdin, stdout: stdout, wait_thr: wait_thr)
+      begin
+        endpoint = read_endpoint(stdout, timeout)
+        raise BrowserError, "Browser launcher failed to report a WebSocket endpoint" unless endpoint
+        browser.instance_variable_set(:@endpoint, endpoint)
+        browser
+      ensure
+        browser.close unless endpoint
+      end
     end
 
     def initialize(endpoint:, stdin:, stdout:, wait_thr:)
@@ -52,7 +70,10 @@ module ParademPdf
       @closed = false
     end
 
-    attr_reader :endpoint
+    def endpoint
+      raise BrowserError, "Browser is closed" if @closed
+      @endpoint
+    end
 
     def closed?
       @closed
@@ -61,20 +82,32 @@ module ParademPdf
     def close
       return if @closed
       @closed = true
-      @stdin.close unless @stdin.closed?
-      return if @wait_thr.join(CLOSE_GRACE)
-      signal("TERM", @pid)
-      return if @wait_thr.join(KILL_GRACE)
-      signal("KILL", -@pid)
-      @wait_thr.join
+      begin
+        @stdin.close unless @stdin.closed?
+        if @wait_thr.join(CLOSE_GRACE)
+          raise BrowserError, "Browser launcher close failed (exit #{@wait_thr.value.exitstatus})" unless @wait_thr.value.success?
+          return
+        end
+        signal("TERM")
+        unless @wait_thr.join(KILL_GRACE)
+          signal("KILL")
+          raise BrowserError, "Browser launcher could not be reaped" unless @wait_thr.join(KILL_GRACE)
+        end
+        raise BrowserError, "Browser launcher required forced cleanup"
+      ensure
+        @stdout.close unless @stdout.closed?
+      end
     end
 
     private
 
-    def signal(sig, target)
-      Process.kill(sig, target)
-    rescue Errno::ESRCH, Errno::EPERM
+    def signal(sig)
+      return if @wait_thr.join(0)
+      Process.kill(sig, -@pid)
+    rescue Errno::ESRCH
       nil
+    rescue Errno::EPERM => error
+      raise BrowserError, "Browser launcher cleanup failed: #{error.message}"
     end
 
     class << self
@@ -82,38 +115,33 @@ module ParademPdf
 
       def reject_bypass!(options)
         raise ArgumentError, "Sandbox bypass is not allowed" if ENV["GROVER_NO_SANDBOX"] == "true"
-        args = options[:launch_args] || options["launch_args"] || options["launchArgs"] || []
+        if options.key?("launchargs")
+          raise ArgumentError, "Raw browser options must use launch_args, not launchArgs"
+        end
+        args = options.fetch("launchArgs", [])
+        unless args.is_a?(Array) && args.all? { |arg| arg.is_a?(String) }
+          raise ArgumentError, "Browser launch arguments must be an Array of Strings"
+        end
         if args.any? { |arg| arg.to_s.match?(BYPASS_FLAGS) }
           raise ArgumentError, "Unsafe browser security arguments"
         end
       end
 
       def read_endpoint(stdout, timeout)
-        endpoint = nil
-        reader = Thread.new do
-          while (line = stdout.gets)
-            if line.match?(ENDPOINT_PATTERN)
-              endpoint = line.strip
-              break
-            end
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+        buffer = +""
+        loop do
+          remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          return unless remaining.positive? && IO.select([stdout], nil, nil, remaining)
+          chunk = stdout.read_nonblock(4096, exception: false)
+          return if chunk.nil?
+          next if chunk == :wait_readable
+          buffer << chunk
+          while (newline = buffer.index("\n"))
+            line = buffer.slice!(0, newline + 1)
+            return line.strip if line.match?(ENDPOINT_PATTERN)
           end
         end
-        reader.join(timeout)
-        endpoint
-      end
-
-      def kill_owned(stdin, wait_thr)
-        stdin.close unless stdin.closed?
-        signal("TERM", wait_thr.pid)
-        wait_thr.join(CLOSE_GRACE)
-        signal("KILL", wait_thr.pid)
-        wait_thr.join
-      end
-
-      def signal(sig, target)
-        Process.kill(sig, target)
-      rescue Errno::ESRCH, Errno::EPERM
-        nil
       end
     end
   end

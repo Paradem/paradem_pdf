@@ -36,6 +36,17 @@ module ParademPdf
       unless @effective_options["margin"] == baseline["margin"]
         raise ArgumentError, "HTML metadata conflicts with selected margins"
       end
+      @browser_endpoint = @effective_options.delete("browserWsEndpoint")
+      if @browser_endpoint
+        parsed = Nokogiri::HTML(@html)
+        endpoint_tags = parsed.xpath("//meta").select do |meta|
+          meta["name"].to_s[/#{Grover.configuration.meta_tag_prefix}([a-z_-]+)/, 1] == "browser_ws_endpoint"
+        end
+        unless endpoint_tags.empty?
+          endpoint_tags.each(&:remove)
+          @html = parsed.to_html
+        end
+      end
       @inputs = {"html" => @html, "origin" => @origin, "options" => @effective_options,
                  "root_path" => @root_path}
     end
@@ -57,12 +68,23 @@ module ParademPdf
       @inputs.deep_dup
     end
 
-    attr_reader :root_path
+    def self.normalize_browser_options(options:)
+      raise ArgumentError, "Options must be a Hash" unless options.is_a?(Hash)
+      native = Grover.new("", **options)
+      [native.send(:normalized_options, path: nil).deep_dup, native.send(:root_path).deep_dup]
+    end
+
+    def browser_options
+      @effective_options.deep_dup
+    end
+
+    attr_reader :root_path, :browser_endpoint
 
     def to_pdf(browser_endpoint: nil)
       native = Grover.new("")
       native.instance_variable_set(:@root_path, @root_path)
       options = @effective_options.deep_dup
+      browser_endpoint ||= @browser_endpoint
       options["browserWsEndpoint"] = browser_endpoint if browser_endpoint
       native.send(:processor).convert(:pdf, @html, options)
     end

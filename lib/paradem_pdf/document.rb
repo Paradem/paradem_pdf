@@ -42,6 +42,9 @@ module ParademPdf
         @explicit_endpoint = @options.delete(key) if @options.key?(key)
         @explicit_endpoint = @options.delete(key.to_sym) if @options.key?(key.to_sym)
       end
+      if @explicit_endpoint && !@explicit_endpoint.to_s.match?(Browser::ENDPOINT_PATTERN)
+        raise ArgumentError, "browser_ws_endpoint must be a ws:// or wss:// URL"
+      end
       @origin = GroverRenderer.normalize_origin(origin)
       if @cache
         unless cache_namespace.is_a?(String) && !cache_namespace.strip.empty?
@@ -60,7 +63,8 @@ module ParademPdf
       provider = -> {
         return browser.endpoint if browser
         return @explicit_endpoint if @explicit_endpoint
-        owned ||= Browser.open(options: @options, root_path: body_renderer.root_path)
+        return body_renderer.browser_endpoint if body_renderer.browser_endpoint
+        owned ||= Browser.open(effective_options: body_renderer.browser_options, root_path: body_renderer.root_path)
         owned.endpoint
       }
 

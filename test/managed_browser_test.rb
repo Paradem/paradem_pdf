@@ -1,6 +1,5 @@
 require "test_helper"
 require "paradem_pdf"
-require "stringio"
 
 class FakeStdin
   attr_reader :closed
@@ -31,18 +30,33 @@ class FakeWaitThread
     @joins += 1
     (@joins > @exit_after_joins) ? self : nil
   end
-end
 
-class SlowStdout
-  def gets
-    sleep 0.2
-    nil
+  def value
+    Struct.new(:success?, :exitstatus).new(true, 0)
   end
 end
 
 class ManagedBrowserTest < Minitest::Test
+  def setup
+    @ios = []
+  end
+
+  def teardown
+    @ios.each { |io| io.close unless io.closed? }
+  end
+
+  def pipe_stdout(contents)
+    reader, writer = IO.pipe
+    @ios.concat([reader, writer])
+    unless contents.nil?
+      writer.write(contents)
+      writer.close
+    end
+    reader
+  end
+
   def endpoint_stdout
-    StringIO.new("ws://localhost:3000/devtools/browser/abc\n")
+    pipe_stdout("ws://localhost:3000/devtools/browser/abc\n")
   end
 
   def stub_spawn(stdin, stdout, wait_thr)
@@ -111,7 +125,7 @@ class ManagedBrowserTest < Minitest::Test
     stdin = FakeStdin.new
     wait_thr = FakeWaitThread.new(pid: 12345, exit_after_joins: 0)
 
-    stub_spawn(stdin, StringIO.new(""), wait_thr) do
+    stub_spawn(stdin, pipe_stdout(""), wait_thr) do
       Process.stub(:kill, ->(_sig, _target) {}) do
         assert_raises(ParademPdf::BrowserError) do
           ParademPdf::Browser.open(options: {}, root_path: "/app")
@@ -124,7 +138,7 @@ class ManagedBrowserTest < Minitest::Test
     stdin = FakeStdin.new
     wait_thr = FakeWaitThread.new(pid: 12345, exit_after_joins: 0)
 
-    stub_spawn(stdin, StringIO.new("garbage\nmore garbage\n"), wait_thr) do
+    stub_spawn(stdin, pipe_stdout("garbage\nmore garbage\n"), wait_thr) do
       Process.stub(:kill, ->(_sig, _target) {}) do
         assert_raises(ParademPdf::BrowserError) do
           ParademPdf::Browser.open(options: {}, root_path: "/app")
@@ -137,7 +151,7 @@ class ManagedBrowserTest < Minitest::Test
     stdin = FakeStdin.new
     wait_thr = FakeWaitThread.new(pid: 12345, exit_after_joins: 0)
 
-    stub_spawn(stdin, SlowStdout.new, wait_thr) do
+    stub_spawn(stdin, pipe_stdout(nil), wait_thr) do
       Process.stub(:kill, ->(_sig, _target) {}) do
         assert_raises(ParademPdf::BrowserError) do
           ParademPdf::Browser.open(options: {}, root_path: "/app", timeout: 0.01)
@@ -181,14 +195,16 @@ class ManagedBrowserTest < Minitest::Test
 
   def test_close_force_path_signals_process_group
     stdin = FakeStdin.new
-    wait_thr = FakeWaitThread.new(pid: 12345, exit_after_joins: 99)
+    wait_thr = FakeWaitThread.new(pid: 12345, exit_after_joins: 4)
     browser = ParademPdf::Browser.new(endpoint: "ws://x", stdin: stdin, stdout: endpoint_stdout, wait_thr: wait_thr)
 
     signals = []
-    Process.stub(:kill, ->(sig, target) { signals << [sig, target] }) { browser.close }
+    Process.stub(:kill, ->(sig, target) { signals << [sig, target] }) do
+      assert_raises(ParademPdf::BrowserError) { browser.close }
+    end
 
     assert stdin.closed?
-    assert_equal [["TERM", 12345], ["KILL", -12345]], signals
+    assert_equal [["TERM", -12345], ["KILL", -12345]], signals
   end
 
   def test_close_is_idempotent
