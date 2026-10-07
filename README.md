@@ -5,7 +5,9 @@ adding per-page HTML headers and footers, concatenating PDFs, and caching PDF by
 
 The core provides document conversion, validated PDF concatenation, per-page
 decorations, and byte caching. Optional Rails adapters use a supplied renderer
-and the configured cache. Browser output verification is still pending.
+and the configured cache. The generic browser gate has passed on arm64 macOS
+with Ruby 3.4.8 and 4.0.7. Application-specific output and Linux CI execution
+require their own verification.
 
 ## Runtime requirements
 
@@ -23,17 +25,18 @@ Executed checks on arm64 macOS as of 2026-10-07:
 
 | Bundle | Ruby | Evidence |
 | --- | --- | --- |
-| Core, without Rails | 3.2.9, 3.3.6, 3.4.6, 3.4.8, 4.0.1, 4.0.7 | Full unit suite, standalone core checks, and StandardRB |
+| Core, without Rails | 3.2.9, 3.3.6, 3.4.8, 4.0.7 | Full unit suite, standalone core checks, and StandardRB |
 | Rails 7.2.4 | 3.2.9 | Full suite and StandardRB, database-free Rails fixtures |
 | Rails 8.1.4 | 3.3.6 | Full suite and StandardRB, database-free Rails fixtures |
+| Actual browser, Chrome 139 and Puppeteer 24.17.0 | 3.4.8, 4.0.7 | Portrait/landscape, shared-cache 2/3 totals, fonts, placement, cache hits and owned cleanup |
 
 Ruby's official download page lists 4.0.7 as latest stable on this date.
 The root development lock now selects Ruby-3.2-compatible `parallel 1.28.0`.
 This resolves the frozen-install failure from `parallel 2.3.0`, which requires
 Ruby 3.3. No production dependency or gemspec Ruby requirement changed.
-Root suites skip optional Rails cases. These checks replace PDF conversion at
-the native processor boundary and do not prove browser output or every possible
-Rails/Ruby combination.
+Default root suites skip optional Rails and browser cases. Unit checks replace
+PDF conversion at the native processor boundary. The separately enabled browser
+gate uses real conversion. Neither proves every possible Rails/Ruby combination.
 
 ## Generate a document
 
@@ -84,8 +87,8 @@ completed-cache hit returns before any browser launches.
 At a high level, a render runs the body first (serially, to learn the page
 count), then renders each header and footer overlay in parallel across a
 bounded thread pool, then merges the overlays back onto their pages in order.
-One Chrome serves every conversion in the render, so memory stays flat instead
-of growing with the page count.
+One Chrome serves every conversion in the render. Memory use and rendering
+speed have not been measured.
 
 ```ruby
 bytes = document.to_pdf
@@ -103,6 +106,13 @@ end
 
 `to_pdf` closes only the browser it opened itself. A `browser:` passed in is
 owned by the caller and is never closed by `to_pdf`.
+
+Batch endpoint waiting defaults to 30 seconds, including an explicit nil
+timeout. Endpoint and native launch timeouts must be finite positive numbers.
+Cleanup uses bounded close and owned-group reaping. Forced cleanup, unsuccessful
+native close, or an unreaped launcher raises `ParademPdf::BrowserError`.
+A closed browser cannot be reused. Cleanup errors retain any active render
+error in their cause chain.
 
 Overlay conversions fan out across a bounded thread pool. Set the per-document
 concurrency with the constructor option:
@@ -122,6 +132,9 @@ Chromium.
 
 `browser_ws_endpoint` is infrastructure, never a cache input or fingerprint.
 It is a conversion-time argument, not a rendering option.
+Global and body-metadata launch options use Grover's captured native
+normalization, including timeout coercion. Explicit global/metadata endpoints
+are also excluded from rendering fingerprints and do not trigger managed launch.
 
 Naming: `options[:browser]` keeps Grover's meaning — the puppeteer browser
 channel (for example `"firefox"`). `to_pdf(browser:)` takes a
@@ -267,16 +280,16 @@ BUNDLE_FROZEN=true BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle exec rake te
 BUNDLE_FROZEN=true BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle exec standardrb
 ```
 
-CI is planned for Ruby 3.2, 3.3, 3.4, 4.0, plus `ruby` to track latest stable.
-It will include the separate Rails 7.2/Ruby 3.2 and Rails 8.1/Ruby 3.3 checks.
-No CI run is claimed here.
+The committed CI workflow covers Ruby 3.2, 3.3, 3.4, 4.0, plus `ruby` to track
+latest stable. It includes separate Rails 7.2/Ruby 3.2 and Rails 8.1/Ruby 3.3
+checks and one normal-security Linux browser job. The workflow has not been
+executed in GitHub Actions as part of this verification.
 
-### Planned opt-in browser check
+### Opt-in browser check
 
-The following fixture and flag are documented before their implementation.
-`test/browser_test.rb` and `test/support/browser_fixture.rb` are not available
-yet. After implementation, install Puppeteer in the checkout or expose an
-existing compatible installation with `NODE_PATH`. For a new local installation:
+`test/browser_test.rb` and `test/support/browser_fixture.rb` use the
+`PARADEM_PDF_BROWSER=1` opt-in flag. Install Puppeteer in the checkout or expose
+an existing compatible installation with `NODE_PATH`. For a new local installation:
 
 ```sh
 npm install --no-save --package-lock=false puppeteer@24.17.0
@@ -298,17 +311,25 @@ env -u GROVER_NO_SANDBOX PARADEM_PDF_BROWSER=1 BUNDLE_FROZEN=true \
   bundle exec rake test TEST='test/browser_test.rb'
 ```
 
-The planned check uses actual conversion of two- and three-page portrait and
+The check uses actual conversion of two- and three-page portrait and
 landscape documents with dynamic headers and footers. It inspects embedded
 fonts with `pdffonts` and per-page text positions with `pdftotext -bbox`.
 Body margins must keep decorations clear of body text. Separate headers and
 footers must each load their font. The fixture renders through the managed
-browser and expects one browser launch per render (two for the fixture), or
-one per batch, not one per conversion. It uses finite launch, navigation,
+browser and expects one browser launch per cold or warm render, none for a
+completed hit, and one for a shared batch, not one per conversion. Both totals
+reuse a cache store. Warm decorations require one body conversion. Every native
+body/header/footer PDF is checked for embedded fonts before capture reset.
+It uses finite launch, navigation,
 conversion, and worker deadlines and cleans up only its own browser process
 group. It rejects sandbox, web-security, or certificate bypass flags.
 An opt-in run with missing prerequisites must fail, not silently skip.
 A skipped browser test is not browser evidence.
+
+Actual checks passed with platform Arial on arm64 macOS, Node 22.22.2,
+Puppeteer 24.17.0 and Chrome for Testing 139.0.7258.138. They cover generic Latin
+fixture text, not application-specific fonts, multilingual glyphs or layouts.
+Normal close and child reaping were recorded with no forced cleanup.
 
 ## License and distribution
 

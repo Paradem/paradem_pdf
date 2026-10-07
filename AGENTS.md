@@ -70,7 +70,7 @@ passing browser evidence.
   separately from the gem's Ruby requirement; do not silently re-resolve it.
 - CI targets Ruby 3.2, 3.3, 3.4, 4.0 and latest stable. Keep database-free Rails
   7.2/Ruby 3.2 and Rails 8.1/Ruby 3.3 checks separate from the core bundle.
-- The planned generic browser gate is `PARADEM_PDF_BROWSER=1 bundle exec rake
+- The generic browser gate is `PARADEM_PDF_BROWSER=1 bundle exec rake
   test TEST='test/browser_test.rb'`. When enabled, missing prerequisites fail.
   Use platform fonts supplied by `PARADEM_PDF_TEST_FONT`, not application font
   files. Check actual multi-page portrait/landscape output, changing totals,
