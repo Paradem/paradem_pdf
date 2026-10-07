@@ -1,0 +1,78 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ['3.2', '3.3', '3.4', '4.0', ruby]
+    env:
+      BUNDLE_FROZEN: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - run: bundle exec rake test
+      - run: bundle exec standardrb
+
+  rails:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ruby: '3.2'
+            gemfile: gemfiles/rails_7_2.gemfile
+          - ruby: '3.3'
+            gemfile: gemfiles/rails_8_1.gemfile
+    env:
+      BUNDLE_FROZEN: 'true'
+      BUNDLE_GEMFILE: ${{ matrix.gemfile }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - run: bundle exec rake test
+      - run: bundle exec standardrb
+
+  browser:
+    runs-on: ubuntu-22.04
+    env:
+      BUNDLE_FROZEN: 'true'
+      PARADEM_PDF_BROWSER: '1'
+      PARADEM_PDF_TEST_FONT: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y poppler-utils fonts-dejavu-core xvfb libnss3 libatk-bridge2.0-0 libxkbcommon0 libgbm1 libasound2
+      - run: npm install --no-save --package-lock=false puppeteer@24.17.0
+      - name: Select installed Chrome with normal sandbox
+        run: |
+          test "$(id -u)" -ne 0
+          echo "PUPPETEER_EXECUTABLE_PATH=$(node -p 'require("puppeteer").executablePath()')" >> "$GITHUB_ENV"
+      - name: Real browser output
+        timeout-minutes: 35
+        run: xvfb-run -a bundle exec rake test TEST='test/browser_test.rb'
