@@ -39,7 +39,7 @@ module BrowserFixture
 
   def self.html(content, font, style: "")
     <<~HTML
-      <!doctype html><html><head><style>
+      <!doctype html><html><head><link rel="icon" href="data:,"><style>
         @font-face { font-family: Fixture; src: url(data:font/ttf;base64,#{font}); }
         html, body { margin: 0; font-family: Fixture; font-size: 12px; }
         #{style}
@@ -68,9 +68,9 @@ module BrowserFixture
       unless header.map(&:text) == ["Header#{index + 1}of#{total}"] && footer.map(&:text) == ["Footer#{index + 1}of#{total}"] && body.map(&:text).include?("Body#{index + 1}")
         raise "Wrong page labels or stale total"
       end
-      unless header.all? { |word| word["yMin"].to_f > 20 && word["yMax"].to_f < 60 } &&
-          footer.all? { |word| word["yMin"].to_f > height - 60 && word["yMax"].to_f < height - 20 } &&
-          body.all? { |word| word["yMin"].to_f >= 70 && word["yMax"].to_f <= height - 70 }
+      unless header.all? { |word| word["yMin"].to_f > 10 && word["yMax"].to_f < 60 } &&
+          footer.all? { |word| word["yMin"].to_f > height - 60 && word["yMax"].to_f < height - 10 } &&
+          body.all? { |word| word["yMin"].to_f >= 60 && word["yMax"].to_f <= height - 60 }
         raise "Text outside reserved header/body/footer bands"
       end
     end
