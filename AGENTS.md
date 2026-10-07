@@ -46,6 +46,22 @@ separately. Browser proof requires actual browser conversion, bounded timeouts,
 and cleanup of only owned processes. Do not describe skipped browser tests as
 passing browser evidence.
 
+- Use frozen locks for verification. Report an incompatible development lock
+  separately from the gem's Ruby requirement; do not silently re-resolve it.
+- CI targets Ruby 3.2, 3.3, 3.4, 4.0 and latest stable. Keep database-free Rails
+  7.2/Ruby 3.2 and Rails 8.1/Ruby 3.3 checks separate from the core bundle.
+- The planned generic browser gate is `PARADEM_PDF_BROWSER=1 bundle exec rake
+  test TEST='test/browser_test.rb'`. When enabled, missing prerequisites fail.
+  Use platform fonts supplied by `PARADEM_PDF_TEST_FONT`, not application font
+  files. Check actual multi-page portrait/landscape output, changing totals,
+  embedded fonts, and header/body/footer positions with Poppler tools.
+- Browser fixtures must reject security-bypass flags. Bound launch, navigation,
+  conversion, worker lifetime, and owned-process close/reaping. Forced or failed
+  cleanup is a failed proof, even if PDF bytes were produced. Do not signal
+  unrelated browser processes or assume a PID is a process group.
+- Keep PDFs, temporary font copies, observer records, node_modules, and browser
+  caches out of the gem package. Generic test assets do not become app assets.
+
 ## Parallel work
 
 Use subagents for independent work when possible. Give each worker explicit
