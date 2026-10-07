@@ -98,6 +98,49 @@ class CacheTest < Minitest::Test
     @store.write_error = failure
     assert_same failure, assert_raises(RuntimeError) { @cache.fetch(key: "key", expires_in: 60) { bytes } }
   end
+
+  def test_read_returns_bytes_on_hit_nil_on_miss_and_corrupt
+    bytes = pdf_bytes("one")
+    @store.entries["key"] = [bytes, 60]
+    assert_equal bytes, @cache.read(key: "key")
+
+    assert_nil @cache.read(key: "missing")
+
+    @store.entries["key"] = ["garbage", 60]
+    assert_nil @cache.read(key: "key")
+  end
+
+  def test_read_propagates_store_errors
+    failure = RuntimeError.new("store failed")
+    @store.read_error = failure
+    assert_same failure, assert_raises(RuntimeError) { @cache.read(key: "key") }
+  end
+
+  def test_write_validates_bytes_before_writing
+    [nil, "garbage", pdf_bytes, pdf_bytes("one", "two")].each do |bad|
+      assert_raises(ParademPdf::InvalidPdf) { @cache.write(key: "key", bytes: bad, expires_in: 60, expected_pages: 1) }
+    end
+    assert_empty @store.writes
+  end
+
+  def test_write_is_best_effort_or_strict_and_propagates_errors
+    bytes = pdf_bytes("valid")
+    [false, nil].each do |rejection|
+      @store.write_result = rejection
+      assert_equal bytes, @cache.write(key: "key", bytes: bytes, expires_in: 60)
+      assert_raises(ParademPdf::CacheWriteFailed) { @cache.write(key: "key", bytes: bytes, expires_in: 60, require_cache_write: true) }
+    end
+    failure = RuntimeError.new("store failed")
+    @store.write_error = failure
+    assert_same failure, assert_raises(RuntimeError) { @cache.write(key: "key", bytes: bytes, expires_in: 60) }
+  end
+
+  def test_write_validates_expiry
+    [nil, 0, -1, "60", Float::NAN, Float::INFINITY, Complex(1, 2)].each do |expiry|
+      assert_raises(ArgumentError) { @cache.write(key: "key", bytes: pdf_bytes("one"), expires_in: expiry) }
+    end
+    assert_empty @store.writes
+  end
 end
 
 if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] == "1"

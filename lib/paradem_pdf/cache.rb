@@ -45,20 +45,29 @@ module ParademPdf
       end
     end
 
-    def fetch(key:, expires_in:, expected_pages: nil, require_cache_write: false)
-      self.class.validate_expiry(expires_in)
+    def read(key:, expected_pages: nil)
       cached = @store.read(key)
       begin
         validate(cached, expected_pages)
-        return cached
+        cached
       rescue InvalidPdf
         # Invalid stored bytes are a miss. Store errors still propagate.
+        nil
       end
-      bytes = yield
+    end
+
+    def write(key:, bytes:, expires_in:, expected_pages: nil, require_cache_write: false)
+      self.class.validate_expiry(expires_in)
       validate(bytes, expected_pages)
       written = @store.write(key, bytes, expires_in: expires_in)
       raise CacheWriteFailed, "Cache store rejected PDF write" if require_cache_write && !written
       bytes
+    end
+
+    def fetch(key:, expires_in:, expected_pages: nil, require_cache_write: false)
+      self.class.validate_expiry(expires_in)
+      read(key: key, expected_pages: expected_pages) ||
+        write(key: key, bytes: yield, expires_in: expires_in, expected_pages: expected_pages, require_cache_write: require_cache_write)
     end
 
     private
