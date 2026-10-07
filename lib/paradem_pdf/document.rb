@@ -1,4 +1,5 @@
 require "combine_pdf"
+require "etc"
 
 module ParademPdf
   class Document
@@ -6,14 +7,14 @@ module ParademPdf
 
     def initialize(doc_type:, body_html:, origin:, locale:, header: nil, footer: nil,
       options: {}, body_margins: {}, header_margins: {}, footer_margins: {},
-      cache: nil, cache_namespace: nil, freshness: nil, assets_version: nil, expires_in: nil)
+      cache: nil, cache_namespace: nil, freshness: nil, assets_version: nil, expires_in: nil,
+      concurrency: nil)
       @doc_type = doc_type
       @body_html = body_html
       @origin = origin
       @locale = locale
       @header = header
       @footer = footer
-      @options = options
       @body_margins = body_margins
       @header_margins = header_margins
       @footer_margins = footer_margins
@@ -22,6 +23,10 @@ module ParademPdf
       @freshness = freshness
       @assets_version = assets_version
       @expires_in = expires_in
+      @concurrency = concurrency.nil? ? [Etc.nprocessors || 1, 4].min : concurrency
+      unless @concurrency.is_a?(Integer) && @concurrency.positive?
+        raise ArgumentError, "concurrency must be a positive Integer"
+      end
       {doc_type: doc_type, body_html: body_html, origin: origin, locale: locale}.each do |name, value|
         raise ArgumentError, "#{name} must be a String" unless value.is_a?(String)
       end
@@ -30,6 +35,12 @@ module ParademPdf
       end
       [options, body_margins, header_margins, footer_margins].each do |value|
         raise ArgumentError, "Options and margins must be Hashes" unless value.is_a?(Hash)
+      end
+      @options = options.dup
+      @explicit_endpoint = nil
+      ["browser_ws_endpoint", "browserWsEndpoint"].each do |key|
+        @explicit_endpoint = @options.delete(key) if @options.key?(key)
+        @explicit_endpoint = @options.delete(key.to_sym) if @options.key?(key.to_sym)
       end
       @origin = GroverRenderer.normalize_origin(origin)
       if @cache
@@ -43,45 +54,56 @@ module ParademPdf
       end
     end
 
-    def to_pdf(require_cache_write: false)
+    def to_pdf(browser: nil, require_cache_write: false)
       body_renderer = renderer(@body_html, @body_margins)
-      return assemble(body_renderer, require_cache_write) unless @cache
+      owned = nil
+      provider = -> {
+        return browser.endpoint if browser
+        return @explicit_endpoint if @explicit_endpoint
+        owned ||= Browser.open(options: @options, root_path: body_renderer.root_path)
+        owned.endpoint
+      }
 
-      inputs = cache_inputs("completed").merge(
-        "body" => body_renderer.fingerprint_inputs, "freshness" => @freshness,
-        "header_present" => !@header.nil?, "footer_present" => !@footer.nil?,
-        "header_config" => renderer("", @header_margins).fingerprint_inputs,
-        "footer_config" => renderer("", @footer_margins).fingerprint_inputs
-      )
-      @cache.fetch(key: @cache.key(inputs: inputs), expires_in: @expires_in,
-        require_cache_write: require_cache_write) { assemble(body_renderer, require_cache_write) }
+      if @cache
+        key = @cache.key(inputs: completed_inputs(body_renderer))
+        if (hit = @cache.read(key: key))
+          return hit
+        end
+        bytes = assemble(body_renderer, provider, require_cache_write)
+        @cache.write(key: key, bytes: bytes, expires_in: @expires_in, require_cache_write: require_cache_write)
+        return bytes
+      end
+
+      assemble(body_renderer, provider, require_cache_write)
+    ensure
+      owned&.close
     end
 
-    def assemble(body_renderer, require_cache_write)
-      body = self.class.parse_pdf(body_renderer.to_pdf)
+    def self.browser(options: {}, root_path: nil, timeout: nil)
+      raise ArgumentError, "Document.browser requires a block" unless block_given?
+      browser = Browser.open(options: options, root_path: root_path, timeout: timeout)
+      yield browser
+    ensure
+      browser&.close
+    end
+
+    def assemble(body_renderer, provider, require_cache_write)
+      endpoint = provider.call
+      body = self.class.parse_pdf(body_renderer.to_pdf(browser_endpoint: endpoint))
       total_pages = body.pages.length
+
+      jobs = []
       body.pages.each_with_index do |page, index|
         [["header", @header, @header_margins], ["footer", @footer, @footer_margins]].each do |kind, callback, margins|
           next unless callback
           html = callback.call(page: index + 1, total_pages: total_pages)
-          overlay_renderer = renderer(html, margins)
-          generate = -> {
-            bytes = overlay_renderer.to_pdf
-            validate_overlay(bytes, page)
-            bytes
-          }
-          bytes = if @cache
-            inputs = cache_inputs(kind).merge("page" => index + 1, "total_pages" => total_pages,
-              "rendering" => overlay_renderer.fingerprint_inputs)
-            @cache.fetch(key: @cache.key(inputs: inputs), expires_in: @expires_in,
-              expected_pages: 1, require_cache_write: require_cache_write, &generate)
-          else
-            generate.call
-          end
-          overlay = validate_overlay(bytes, page)
-          page << overlay.pages.first
+          jobs << {page: page, kind: kind, index: index, total_pages: total_pages, renderer: renderer(html, margins)}
         end
       end
+
+      overlays = resolve_overlays(jobs, endpoint, require_cache_write)
+      jobs.each_with_index { |job, position| job[:page] << overlays[position].pages.first }
+
       bytes = body.to_pdf
       self.class.parse_pdf(bytes)
       bytes
@@ -137,6 +159,72 @@ module ParademPdf
     def cache_inputs(kind)
       {"render_version" => RENDER_VERSION, "namespace" => @cache_namespace,
        "doc_type" => @doc_type, "locale" => @locale, "kind" => kind, "assets_version" => @assets_version}
+    end
+
+    def completed_inputs(body_renderer)
+      cache_inputs("completed").merge(
+        "body" => body_renderer.fingerprint_inputs, "freshness" => @freshness,
+        "header_present" => !@header.nil?, "footer_present" => !@footer.nil?,
+        "header_config" => renderer("", @header_margins).fingerprint_inputs,
+        "footer_config" => renderer("", @footer_margins).fingerprint_inputs
+      )
+    end
+
+    def overlay_inputs(job)
+      cache_inputs(job[:kind]).merge("page" => job[:index] + 1, "total_pages" => job[:total_pages],
+        "rendering" => job[:renderer].fingerprint_inputs)
+    end
+
+    def resolve_overlays(jobs, endpoint, require_cache_write)
+      results = Array.new(jobs.length)
+      pending = []
+
+      jobs.each_with_index do |job, position|
+        if @cache
+          key = @cache.key(inputs: overlay_inputs(job))
+          if (hit = @cache.read(key: key, expected_pages: 1))
+            results[position] = validate_overlay(hit, job[:page])
+          else
+            pending << {position: position, job: job, key: key}
+          end
+        else
+          pending << {position: position, job: job, key: nil}
+        end
+      end
+
+      queue = Queue.new
+      pending.each { |item| queue << item }
+
+      workers = Array.new([@concurrency, pending.length].min) do
+        Thread.new do
+          loop do
+            item = begin
+              queue.pop(true)
+            rescue ThreadError
+              break
+            end
+            begin
+              item[:bytes] = item[:job][:renderer].to_pdf(browser_endpoint: endpoint)
+            rescue => error
+              item[:error] = error
+            end
+          end
+        end
+      end
+      workers.each(&:join)
+
+      if (failed = pending.find { |item| item[:error] })
+        raise failed[:error]
+      end
+
+      pending.each do |item|
+        bytes = item[:bytes]
+        results[item[:position]] = validate_overlay(bytes, item[:job][:page])
+        @cache&.write(key: item[:key], bytes: bytes, expires_in: @expires_in,
+          expected_pages: 1, require_cache_write: require_cache_write)
+      end
+
+      results
     end
 
     def validate_overlay(bytes, page)

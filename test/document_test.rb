@@ -79,7 +79,8 @@ class DocumentTest < Minitest::Test
         end
       end
     end
-    assert_equal ["body A", "public 1/2", "public 2/2", "body B"], conversions
+    assert_equal ["body A", "body B"], conversions.select { |html| html.start_with?("body") }
+    assert_equal ["public 1/2", "public 2/2"], conversions.select { |html| html.start_with?("public") }.sort
   end
 
   def test_separates_two_page_and_three_page_totals
@@ -118,7 +119,8 @@ class DocumentTest < Minitest::Test
       bytes = cached_document(store, footer: footer, freshness: {"page2" => "new"}).to_pdf
       assert_includes page_text(ParademPdf::Document.parse_pdf(bytes).pages.last), "footer 2/2 new"
     end
-    assert_equal ["body", "footer 1/2 public", "footer 2/2 old", "body", "footer 2/2 new"], conversions
+    assert_equal ["body", "body"], conversions.select { |html| html == "body" }
+    assert_equal ["footer 1/2 public", "footer 2/2 new", "footer 2/2 old"], conversions.reject { |html| html == "body" }.sort
   end
 
   def test_isolates_personalized_and_translated_decorations
@@ -429,7 +431,8 @@ class DocumentTest < Minitest::Test
       cached_document(store, header: ->(**) { "header" }, footer: ->(**) { "footer" }).to_pdf
       cached_document(store, header: ->(**) { "header" }, footer: ->(**) { "footer" }, footer_margins: {bottom: "15mm"}).to_pdf
     end
-    assert_equal ["body", "header", "footer", "body", "footer"], conversions
+    assert_equal ["body", "body"], conversions.select { |html| html == "body" }
+    assert_equal ["footer", "footer", "header"], conversions.reject { |html| html == "body" }.sort
   end
 
   def test_renders_each_decoration_with_actual_page_and_total
@@ -466,7 +469,8 @@ class DocumentTest < Minitest::Test
       calls.clear
       document(header: ->(**) { "header" }, footer: ->(**) { "footer" },
         body_margins: {top: "13mm"}, header_margins: {top: "2mm"}, footer_margins: {bottom: "15mm"}).to_pdf
-      assert_equal [["body", {"top" => "13mm"}], ["header", {"top" => "2mm"}], ["footer", {"bottom" => "15mm"}]], calls
+      assert_equal [["body", {"top" => "13mm"}]], calls.select { |entry| entry.first == "body" }
+      assert_equal [["footer", {"bottom" => "15mm"}], ["header", {"top" => "2mm"}]], calls.reject { |entry| entry.first == "body" }.sort
     end
   end
 
@@ -584,6 +588,157 @@ class DocumentTest < Minitest::Test
 
     assert status.success?, errors
     assert_equal "document\n", output
+  end
+
+  def test_opens_and_closes_one_browser_per_render
+    opens = 0
+    browser = FakeBrowser.new
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }, browser: -> {
+      opens += 1
+      browser
+    }) do
+      document(footer: ->(**) { "footer" }).to_pdf
+    end
+    assert_equal 1, opens
+    assert browser.closed?
+  end
+
+  def test_closes_browser_when_conversion_raises
+    browser = FakeBrowser.new
+    failure = Grover::Error.new("native failure")
+    convert_using(->(*) { raise failure }, browser: -> { browser }) do
+      assert_same failure, assert_raises(Grover::Error) { document.to_pdf }
+    end
+    assert browser.closed?
+  end
+
+  def test_batch_opens_one_browser_and_reuses_it_across_documents
+    opens = 0
+    browser = FakeBrowser.new
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }, browser: -> {
+      opens += 1
+      browser
+    }) do
+      ParademPdf::Document.browser do |shared|
+        assert_same browser, shared
+        document(footer: ->(**) { "footer" }).to_pdf(browser: shared)
+        document(footer: ->(**) { "footer" }).to_pdf(browser: shared)
+      end
+    end
+    assert_equal 1, opens
+    assert browser.closed?
+  end
+
+  def test_batch_closes_browser_when_block_raises
+    browser = FakeBrowser.new
+    failure = RuntimeError.new("batch failed")
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }, browser: -> { browser }) do
+      assert_same failure, assert_raises(RuntimeError) {
+        ParademPdf::Document.browser { |_shared| raise failure }
+      }
+    end
+    assert browser.closed?
+  end
+
+  def test_batch_requires_a_block
+    assert_raises(ArgumentError) { ParademPdf::Document.browser }
+  end
+
+  def test_caller_supplied_browser_is_never_closed
+    browser = FakeBrowser.new
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }) do
+      document(footer: ->(**) { "footer" }).to_pdf(browser: browser)
+    end
+    refute browser.closed?
+  end
+
+  def test_explicit_endpoint_opens_nothing_and_never_enters_cache_or_fingerprints
+    opens = 0
+    store = TestCacheStore.new
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }, browser: -> {
+      opens += 1
+      FakeBrowser.new
+    }) do
+      cached_document(store, footer: ->(**) { "footer" }, options: {browser_ws_endpoint: "ws://explicit"}).to_pdf
+      cached_document(store, footer: ->(**) { "footer" }).to_pdf
+    end
+    assert_equal 0, opens
+    assert_equal 2, store.writes.length
+    assert_equal 2, store.writes.map(&:first).uniq.length
+
+    renderer = document(options: {browser_ws_endpoint: "ws://explicit"}).send(:renderer, "body", {})
+    refute_includes renderer.fingerprint_inputs.to_s, "ws://explicit"
+  end
+
+  def test_completed_cache_hit_opens_nothing
+    store = TestCacheStore.new
+    opens = 0
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }, browser: -> {
+      opens += 1
+      FakeBrowser.new
+    }) do
+      cached_document(store, footer: ->(**) { "footer" }).to_pdf
+      opens = 0
+      cached_document(store, footer: ->(**) { "footer" }).to_pdf
+    end
+    assert_equal 0, opens
+  end
+
+  def test_concurrency_defaults_to_min_of_processors_and_four
+    {8 => 4, 2 => 2, nil => 1}.each do |processors, expected|
+      Etc.stub(:nprocessors, processors) do
+        assert_equal expected, document.instance_variable_get(:@concurrency)
+      end
+    end
+  end
+
+  def test_overlays_convert_concurrently
+    body_bytes = pdf_bytes("one", "two", "three", "four")
+    footer_bytes = pdf_bytes("footer")
+    in_flight = 0
+    max_in_flight = 0
+    mutex = Mutex.new
+    factory = Grover::Processor.method(:new)
+    Grover::Processor.stub(:new, ->(root) {
+      processor = factory.call(root)
+      processor.define_singleton_method(:convert) do |_kind, html, _options|
+        if html == "body"
+          body_bytes
+        else
+          mutex.synchronize do
+            in_flight += 1
+            max_in_flight = [max_in_flight, in_flight].max
+          end
+          sleep 0.05
+          mutex.synchronize { in_flight -= 1 }
+          footer_bytes
+        end
+      end
+      processor
+    }) do
+      ParademPdf::Browser.stub(:open, ->(**) { FakeBrowser.new }) do
+        document(concurrency: 4, footer: ->(page:, total_pages:) { "footer #{page}/#{total_pages}" }).to_pdf
+      end
+    end
+    assert_operator max_in_flight, :>, 1
+  end
+
+  def test_rejects_invalid_concurrency
+    [0, -1, 1.5, "4"].each do |value|
+      assert_raises(ArgumentError) { document(concurrency: value) }
+    end
+  end
+
+  def test_browser_open_failure_raises_browser_error_and_never_converts
+    converted = false
+    failure = ParademPdf::BrowserError.new("launch failed")
+    convert_using(->(_kind, html, *) {
+      converted = true
+      pdf_bytes(html)
+    }, browser: -> { raise failure }) do
+      assert_same failure, assert_raises(ParademPdf::BrowserError) { document.to_pdf }
+    end
+    refute converted
   end
 
   {

@@ -1,6 +1,23 @@
 require "combine_pdf"
 require "grover"
 
+class FakeBrowser
+  attr_reader :endpoint
+
+  def initialize(endpoint: "ws://stub")
+    @endpoint = endpoint
+    @closed = false
+  end
+
+  def close
+    @closed = true
+  end
+
+  def closed?
+    @closed
+  end
+end
+
 module PdfHelpers
   LETTER = [0, 0, 612, 792].freeze
   A4 = [0, 0, 595.28, 841.89].freeze
@@ -17,13 +34,16 @@ module PdfHelpers
     pdf.to_pdf
   end
 
-  def convert_using(conversion)
+  def convert_using(conversion, browser: nil)
     factory = Grover::Processor.method(:new)
+    mutex = Mutex.new
     Grover::Processor.stub(:new, ->(root) {
       processor = factory.call(root)
-      processor.define_singleton_method(:convert) { |kind, html, options| conversion.call(kind, html, options, root) }
+      processor.define_singleton_method(:convert) { |kind, html, options| mutex.synchronize { conversion.call(kind, html, options, root) } }
       processor
-    }) { yield }
+    }) do
+      ParademPdf::Browser.stub(:open, ->(**) { browser ? browser.call : FakeBrowser.new }) { yield }
+    end
   end
 
   def page_text(page)
