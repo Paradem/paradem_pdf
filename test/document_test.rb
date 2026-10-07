@@ -1,6 +1,7 @@
 require "test_helper"
 require "paradem_pdf"
 require "support/pdf_helpers"
+require "support/cache_store"
 
 class DocumentTest < Minitest::Test
   include StandaloneRuby
@@ -25,7 +26,7 @@ class DocumentTest < Minitest::Test
       origin: "https://documents.example.test/", locale: "en",
       header: decoration, footer: decoration, options: {format: "Letter"},
       body_margins: {bottom: "23mm"}, header_margins: {}, footer_margins: {bottom: "15mm"},
-      cache: Object.new, cache_namespace: "example", freshness: {"revision" => 1},
+      cache: TestCacheStore.new, cache_namespace: "example", freshness: {"revision" => 1},
       assets_version: "release-1", expires_in: 60
     )
 
@@ -35,6 +36,400 @@ class DocumentTest < Minitest::Test
   def document(**options)
     ParademPdf::Document.new(doc_type: "invoice", body_html: "body",
       origin: "https://documents.example.test/", locale: "en", **options)
+  end
+
+  def cached_document(store, **options)
+    document(cache: store, cache_namespace: "example", freshness: "snapshot-1",
+      assets_version: "assets-1", expires_in: 60, **options)
+  end
+
+  def test_completed_hit_skips_all_conversion_and_callbacks
+    store = TestCacheStore.new
+    callbacks = []
+    conversions = []
+    footer = ->(page:, total_pages:) {
+      callbacks << [page, total_pages]
+      "footer #{page}/#{total_pages}"
+    }
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes(html)
+    }) do
+      bytes = cached_document(store, footer: footer).to_pdf
+      assert_equal bytes, cached_document(store, footer: footer).to_pdf(require_cache_write: true)
+    end
+    assert_equal ["body", "footer 1/1"], conversions
+    assert_equal [[1, 1]], callbacks
+    assert_equal 2, store.writes.length
+  end
+
+  def test_reuses_partial_across_documents_with_same_type_page_total_and_html
+    store = TestCacheStore.new
+    conversions = []
+    footer = ->(page:, total_pages:) { "public #{page}/#{total_pages}" }
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      html.start_with?("body") ? pdf_bytes(html, "second") : pdf_bytes(html)
+    }) do
+      first = cached_document(store, body_html: "body A", footer: footer).to_pdf
+      second = cached_document(store, body_html: "body B", freshness: "new snapshot", footer: footer).to_pdf
+      [first, second].each do |bytes|
+        ParademPdf::Document.parse_pdf(bytes).pages.each_with_index do |page, index|
+          assert_includes page_text(page), "public #{index + 1}/2"
+        end
+      end
+    end
+    assert_equal ["body A", "public 1/2", "public 2/2", "body B"], conversions
+  end
+
+  def test_separates_two_page_and_three_page_totals
+    store = TestCacheStore.new
+    conversions = []
+    footer = ->(page:, total_pages:) { "footer #{page}/#{total_pages}" }
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      if html == "two"
+        pdf_bytes("body", "body")
+      else
+        ((html == "three") ? pdf_bytes("body", "body", "body") : pdf_bytes(html))
+      end
+    }) do
+      [2, 3].each do |total|
+        bytes = cached_document(store, body_html: (total == 2) ? "two" : "three", footer: footer).to_pdf
+        ParademPdf::Document.parse_pdf(bytes).pages.each_with_index do |page, index|
+          assert_includes page_text(page), "footer #{index + 1}/#{total}"
+        end
+      end
+    end
+    assert_equal 7, conversions.length
+  end
+
+  def test_invalidates_page_two_decoration_without_body_changes
+    store = TestCacheStore.new
+    conversions = []
+    second_page = "old"
+    footer = ->(page:, total_pages:) { "footer #{page}/#{total_pages} #{(page == 2) ? second_page : "public"}" }
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      (html == "body") ? pdf_bytes("one", "two") : pdf_bytes(html)
+    }) do
+      cached_document(store, footer: footer).to_pdf
+      second_page = "new"
+      bytes = cached_document(store, footer: footer, freshness: {"page2" => "new"}).to_pdf
+      assert_includes page_text(ParademPdf::Document.parse_pdf(bytes).pages.last), "footer 2/2 new"
+    end
+    assert_equal ["body", "footer 1/2 public", "footer 2/2 old", "body", "footer 2/2 new"], conversions
+  end
+
+  def test_isolates_personalized_and_translated_decorations
+    store = TestCacheStore.new
+    conversions = []
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes(html)
+    }) do
+      [["Alice", "en"], ["Bob", "en"], ["Bob", "ar"], ["Bob", "fa"], ["Bob", "en"]].each do |name, locale|
+        footer = ->(**) { "#{name} 2026 variant A" }
+        cached_document(store, locale: locale, freshness: [name, locale], footer: footer, header: ->(**) { "public" }).to_pdf
+      end
+    end
+    assert_equal 4, conversions.count("body")
+    assert_equal 3, conversions.count("public")
+    assert_equal 1, conversions.count("Alice 2026 variant A")
+    assert_equal 3, conversions.count("Bob 2026 variant A")
+  end
+
+  def test_completed_key_changes_for_every_declared_dimension
+    changes = {doc_type: "report", body_html: "new body", origin: "https://other.example.test/", locale: "ar",
+               cache_namespace: "other", freshness: {"revision" => 2}, assets_version: "assets-2",
+               options: {format: "Letter"}, body_margins: {bottom: "20mm"},
+               header_margins: {top: "1mm"}, footer_margins: {bottom: "1mm"},
+               header: ->(**) { "header" }, footer: ->(**) { "footer" }}
+    changes.each do |field, value|
+      store = TestCacheStore.new
+      bodies = 0
+      convert_using(->(_kind, html, *) {
+        bodies += 1 if html == "body" || html == "new body"
+        pdf_bytes(html)
+      }) do
+        cached_document(store).to_pdf
+        cached_document(store, **{field => value}).to_pdf
+      end
+      assert_equal 2, bodies, field
+    end
+  end
+
+  def test_direction_date_and_variant_changes_with_declared_freshness
+    store = TestCacheStore.new
+    conversions = []
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes(html)
+    }) do
+      ["ltr 2026 A", "rtl 2026 A", "rtl 2027 A", "rtl 2027 B"].each do |data|
+        bytes = cached_document(store, footer: ->(**) { data }, freshness: data).to_pdf
+        assert_includes page_text(ParademPdf::Document.parse_pdf(bytes).pages.first), data
+      end
+    end
+    assert_equal 8, conversions.length
+  end
+
+  def test_warm_footers_survive_completed_eviction_without_mutable_page_leaks
+    store = TestCacheStore.new
+    conversions = []
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes(html)
+    }) do
+      first = cached_document(store, footer: ->(**) { "footer" }).to_pdf
+      completed = store.writes.last.first
+      store.entries.delete(completed)
+      second = cached_document(store, body_html: "another body", footer: ->(**) { "footer" }).to_pdf
+      second_text = page_text(ParademPdf::Document.parse_pdf(second).pages.first)
+      assert_includes second_text, "footer"
+      assert_equal 1, second_text.scan("body").length
+      assert_equal 1, second_text.scan("footer").length
+      assert_includes page_text(ParademPdf::Document.parse_pdf(first).pages.first), "body"
+      store.entries.delete(store.writes.last.first)
+      third = cached_document(store, footer: ->(**) { "footer" }).to_pdf
+      assert_equal 1, page_text(ParademPdf::Document.parse_pdf(third).pages.first).scan("footer").length
+    end
+    assert_equal ["body", "footer", "another body", "body"], conversions
+  end
+
+  def test_requires_explicit_valid_cache_dependencies_before_access
+    store = TestCacheStore.new
+    {cache_namespace: [nil, "", " "], freshness: [nil, Object.new, {symbol: 1}],
+     assets_version: [nil, Object.new], expires_in: [nil, 0, -1, Float::INFINITY]}.each do |field, values|
+      values.each { |value| assert_raises(ArgumentError) { cached_document(store, **{field => value}) } }
+    end
+    assert_raises(ArgumentError) { cached_document(Object.new) }
+    assert_empty store.reads
+    assert_empty store.writes
+  end
+
+  def test_expired_completed_and_decorations_regenerate
+    store = TestCacheStore.new
+    conversions = []
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes(html)
+    }) do
+      cached_document(store, footer: ->(**) { "footer" }).to_pdf
+      store.now = 61
+      cached_document(store, footer: ->(**) { "footer" }).to_pdf
+    end
+    assert_equal ["body", "footer", "body", "footer"], conversions
+    assert store.writes.all? { |_, _, expiry| expiry == 60 }
+  end
+
+  def test_rejected_completed_and_overlay_writes_in_best_effort_and_strict_modes
+    [false, nil].each do |rejection|
+      [nil, ->(**) { "footer" }].each do |footer|
+        store = TestCacheStore.new
+        store.write_result = rejection
+        convert_using(->(_kind, html, *) { pdf_bytes(html) }) do
+          assert_equal 1, ParademPdf::Document.parse_pdf(cached_document(store, footer: footer).to_pdf).pages.length
+          assert_raises(ParademPdf::CacheWriteFailed) { cached_document(store, footer: footer).to_pdf(require_cache_write: true) }
+        end
+        assert_empty store.entries
+      end
+    end
+  end
+
+  def test_overlay_failure_never_publishes_completed_bytes_and_preserves_warm_hits
+    store = TestCacheStore.new
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }) do
+      cached_document(store, footer: ->(**) { "public" }).to_pdf
+      completed = store.writes.last.first
+      old_entries = store.entries.dup
+      failure = RuntimeError.new("callback failed")
+      assert_same failure, assert_raises(RuntimeError) {
+        cached_document(store, freshness: "new", footer: ->(**) { raise failure }).to_pdf(require_cache_write: true)
+      }
+      assert_equal old_entries, store.entries
+      assert store.entries.key?(completed)
+    end
+    convert_using(->(_kind, html, *) { (html == "body") ? pdf_bytes("body") : pdf_bytes("one", "two") }) do
+      assert_raises(ParademPdf::InvalidPdf) { cached_document(store, freshness: "invalid", footer: ->(**) { "invalid" }).to_pdf }
+      assert_equal 2, store.entries.length
+    end
+  end
+
+  def test_corrupt_completed_and_overlay_hits_regenerate_independently
+    ["garbage", pdf_bytes("one", "two"), page_pdf(MediaBox: [0, 0, 0, 792])].each do |corruption|
+      store = TestCacheStore.new
+      conversions = []
+      convert_using(->(_kind, html, *) {
+        conversions << html
+        pdf_bytes(html)
+      }) do
+        cached_document(store, footer: ->(**) { "footer" }).to_pdf
+        overlay_key = store.writes.first.first
+        completed_key = store.writes.last.first
+        store.entries[completed_key] = ["garbage", 60]
+        store.entries[overlay_key] = [corruption, 60]
+        bytes = cached_document(store, footer: ->(**) { "footer" }).to_pdf
+        assert_includes page_text(ParademPdf::Document.parse_pdf(bytes).pages.first), "footer"
+      end
+      assert_equal ["body", "footer", "body", "footer"], conversions
+    end
+  end
+
+  def test_complete_invalidation_reuses_only_unchanged_partial_rendering_inputs
+    changes = {assets_version: "new assets", options: {print_background: false},
+               footer_margins: {bottom: "17mm"}, origin: "https://other.example.test/",
+               locale: "ar", doc_type: "other", cache_namespace: "other"}
+    changes.each do |field, value|
+      store = TestCacheStore.new
+      conversions = []
+      convert_using(->(_kind, html, *) {
+        conversions << html
+        pdf_bytes(html)
+      }) do
+        cached_document(store, footer: ->(**) { "footer" }).to_pdf
+        cached_document(store, footer: ->(**) { "footer" }, **{field => value}).to_pdf
+      end
+      assert_equal ["body", "footer", "body", "footer"], conversions, field
+    end
+  end
+
+  def test_native_configuration_and_html_metadata_enter_completed_fingerprint
+    store = TestCacheStore.new
+    conversions = []
+    original = Grover.configuration.options
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes("body")
+    }) do
+      cached_document(store, body_html: '<meta name="grover-format" content="Letter">').to_pdf
+      cached_document(store, body_html: '<meta name="grover-format" content="A4">').to_pdf
+      Grover.configuration.options = original.merge(timeout: 12345)
+      cached_document(store, body_html: '<meta name="grover-format" content="A4">').to_pdf
+    end
+    assert_equal 3, conversions.length
+  ensure
+    Grover.configuration.options = original
+  end
+
+  def test_render_version_invalidates_completed_and_partial_keys
+    store = TestCacheStore.new
+    conversions = []
+    original = ParademPdf::Document::RENDER_VERSION
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes(html)
+    }) do
+      cached_document(store, footer: ->(**) { "footer" }).to_pdf
+      ParademPdf::Document.send(:remove_const, :RENDER_VERSION)
+      ParademPdf::Document.const_set(:RENDER_VERSION, "next")
+      cached_document(store, footer: ->(**) { "footer" }).to_pdf
+    end
+    assert_equal ["body", "footer", "body", "footer"], conversions
+  ensure
+    ParademPdf::Document.send(:remove_const, :RENDER_VERSION)
+    ParademPdf::Document.const_set(:RENDER_VERSION, original)
+  end
+
+  def test_equivalent_native_options_and_recursive_dependencies_share_completed_hit
+    store = TestCacheStore.new
+    converted = false
+    convert_using(->(_kind, html, *) {
+      flunk "Equivalent options converted" if converted
+      converted = true
+      pdf_bytes(html)
+    }) do
+      first = cached_document(store, options: {timeout: "123", print_background: true},
+        freshness: {"b" => [{"d" => 4, "c" => 3}], "a" => 1}).to_pdf
+      assert_equal first, cached_document(store, options: {"print_background" => true, "timeout" => 123},
+        freshness: {"a" => 1, "b" => [{"c" => 3, "d" => 4}]}).to_pdf
+    end
+  end
+
+  def test_overlay_store_exceptions_propagate_without_completed_publication
+    [false, true].each do |strict|
+      [:read, :write].each do |operation|
+        store = TestCacheStore.new
+        failure = RuntimeError.new("overlay store #{operation}")
+        convert_using(->(_kind, html, *) { pdf_bytes(html) }) do
+          footer = ->(**) {
+            store.public_send("#{operation}_error=", failure)
+            "footer"
+          }
+          assert_same failure, assert_raises(RuntimeError) { cached_document(store, footer: footer).to_pdf(require_cache_write: strict) }
+        end
+        assert_empty store.entries
+      end
+    end
+  end
+
+  def test_strict_completed_write_failure_keeps_successful_overlay_write
+    store = TestCacheStore.new
+    native_write = store.method(:write)
+    store.define_singleton_method(:write) do |key, bytes, expires_in:|
+      entries.empty? ? native_write.call(key, bytes, expires_in: expires_in) : false
+    end
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }) do
+      assert_raises(ParademPdf::CacheWriteFailed) { cached_document(store, footer: ->(**) { "footer" }).to_pdf(require_cache_write: true) }
+    end
+    assert_equal 1, store.entries.length
+    assert_includes page_text(ParademPdf::Document.parse_pdf(store.entries.values.first.first).pages.first), "footer"
+  end
+
+  def test_invalid_overlay_geometry_and_conversion_error_never_publish_bytes
+    store = TestCacheStore.new
+    convert_using(->(_kind, html, *) { pdf_bytes(html, box: (html == "body") ? LETTER : A4) }) do
+      assert_raises(ParademPdf::InvalidPdf) { cached_document(store, footer: ->(**) { "footer" }).to_pdf }
+      assert_empty store.entries
+    end
+    failure = Grover::Error.new("overlay failed")
+    convert_using(->(_kind, html, *) { (html == "body") ? pdf_bytes(html) : (raise failure) }) do
+      assert_same failure, assert_raises(Grover::Error) { cached_document(store, footer: ->(**) { "footer" }).to_pdf }
+      assert_empty store.entries
+    end
+  end
+
+  def test_undeclared_hidden_callback_change_cannot_invalidate_completed_hit
+    store = TestCacheStore.new
+    text = "old"
+    footer = ->(**) { text }
+    convert_using(->(_kind, html, *) { pdf_bytes(html) }) do
+      first = cached_document(store, footer: footer).to_pdf
+      text = "new"
+      assert_equal first, cached_document(store, footer: footer).to_pdf
+    end
+  end
+
+  def test_identical_html_still_separates_part_kind_page_and_actual_total
+    store = TestCacheStore.new
+    conversions = []
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      if html.start_with?("body")
+        pdf_bytes(*Array.new(html.end_with?("3") ? 3 : 2, "body"))
+      else
+        pdf_bytes(html)
+      end
+    }) do
+      [2, 3].each do |total|
+        cached_document(store, body_html: "body #{total}", header: ->(**) { "same" }, footer: ->(**) { "same" }).to_pdf
+      end
+    end
+    assert_equal 10, conversions.count("same")
+    assert_equal 12, store.entries.length
+  end
+
+  def test_footer_margin_change_keeps_public_header_reusable
+    store = TestCacheStore.new
+    conversions = []
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes(html)
+    }) do
+      cached_document(store, header: ->(**) { "header" }, footer: ->(**) { "footer" }).to_pdf
+      cached_document(store, header: ->(**) { "header" }, footer: ->(**) { "footer" }, footer_margins: {bottom: "15mm"}).to_pdf
+    end
+    assert_equal ["body", "header", "footer", "body", "footer"], conversions
   end
 
   def test_renders_each_decoration_with_actual_page_and_total

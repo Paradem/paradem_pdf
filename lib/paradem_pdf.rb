@@ -1,4 +1,5 @@
 require_relative "paradem_pdf/version"
 require_relative "paradem_pdf/errors"
 require_relative "paradem_pdf/grover_renderer"
+require_relative "paradem_pdf/cache"
 require_relative "paradem_pdf/document"
