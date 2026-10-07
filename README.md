@@ -74,6 +74,58 @@ Caller options and HTML metadata cannot override the required origin or
 request-failure policy. Explicit per-part margins override corresponding
 global and caller margins. Conflicting metadata raises before conversion.
 
+## Managed browser and parallel rendering
+
+Each render owns one headless Chrome. `Document#to_pdf` opens the browser
+lazily, only when a conversion is actually needed, passes its WebSocket
+endpoint into every Grover conversion, and closes it when the render ends. A
+completed-cache hit returns before any browser launches.
+
+```ruby
+bytes = document.to_pdf
+```
+
+A batch shares one browser across documents and closes it after the block,
+even on error:
+
+```ruby
+ParademPdf::Document.browser(options: {executable_path: "/path/to/chrome"}) do |browser|
+  first_bytes  = first_document.to_pdf(browser: browser)
+  second_bytes = second_document.to_pdf(browser: browser)
+end
+```
+
+`to_pdf` closes only the browser it opened itself. A `browser:` passed in is
+owned by the caller and is never closed by `to_pdf`.
+
+Overlay conversions fan out across a bounded thread pool. Set the per-document
+concurrency with the constructor option:
+
+```ruby
+document = ParademPdf::Document.new(..., concurrency: 4)
+```
+
+`concurrency:` defaults to `[Etc.nprocessors, 4].min` and must be a positive
+Integer. Cache reads and writes stay on the main thread; only conversions run
+on worker threads.
+
+The launcher reuses the application's existing Node.js and Puppeteer
+installation, resolved exactly as Grover's worker does. Runtime prerequisites
+are unchanged: Node.js, a compatible Puppeteer installation, and Chrome or
+Chromium.
+
+`browser_ws_endpoint` is infrastructure, never a cache input or fingerprint.
+It is a conversion-time argument, not a rendering option.
+
+Naming: `options[:browser]` keeps Grover's meaning — the puppeteer browser
+channel (for example `"firefox"`). `to_pdf(browser:)` takes a
+`ParademPdf::Browser` instance. `Document.browser` is the batch class method.
+These are distinct; the channel option is not the instance.
+
+The gem rejects browser security-bypass flags — `no-sandbox`,
+`disable-setuid-sandbox`, `disable-web-security`, and
+`ignore-certificate-errors` — and `GROVER_NO_SANDBOX=true`, before launching.
+
 ## Cache PDF bytes
 
 Supply a store with `read(key)` and `write(key, bytes, expires_in:)`.
@@ -244,10 +296,11 @@ The planned check uses actual conversion of two- and three-page portrait and
 landscape documents with dynamic headers and footers. It inspects embedded
 fonts with `pdffonts` and per-page text positions with `pdftotext -bbox`.
 Body margins must keep decorations clear of body text. Separate headers and
-footers must each load their font. The fixture will use finite launch,
-navigation, conversion, and worker deadlines and clean up only its own browser
-processes. It will reject sandbox, web-security, or certificate bypass flags.
-No browser service or production security change is needed.
+footers must each load their font. The fixture renders through the managed
+browser and expects one browser launch per render (two for the fixture), or
+one per batch, not one per conversion. It uses finite launch, navigation,
+conversion, and worker deadlines and cleans up only its own browser process
+group. It rejects sandbox, web-security, or certificate bypass flags.
 An opt-in run with missing prerequisites must fail, not silently skip.
 A skipped browser test is not browser evidence.
 

@@ -11,8 +11,9 @@ outside the gem. Optional Rails integration must not affect core loading.
 - Use Minitest in `test/`, not RSpec.
 - Use TDD. Write a behavior test, observe its intended failure, implement the
   smallest fix, and run the complete test suite before marking work complete.
-- Reuse Grover and CombinePDF. Do not add custom cache stores, browser services,
-  locks, schedulers, model integrations, or dependencies without a concrete need.
+- Reuse Grover and CombinePDF. Do not add custom cache stores, locks,
+  schedulers, model integrations, or dependencies without a concrete need. A
+  managed browser is an approved concrete need, owned by `ParademPdf::Browser`.
 - Keep version-dependent Grover normalization and private calls in
   `GroverRenderer`. Capture native effective options once for both fingerprints
   and conversion. Review this boundary when updating Grover.
@@ -34,6 +35,15 @@ decoration keys. Completed keys include explicit callback freshness and asset
 dependencies. Keep authorization and data snapshot ownership in the caller.
 Store exceptions propagate. Strict mode rejects false or nil writes.
 
+## Browser lifecycle
+
+`ParademPdf::Browser` and `lib/paradem_pdf/browser.js` are the owned boundary
+for launching and closing Chrome. One browser per render, one per batch. Bound
+launch, close, and reap with explicit grace periods. Signal only owned children
+(the launcher's process group), never unrelated processes. Reject
+security-bypass flags and `GROVER_NO_SANDBOX=true` before launching. Review
+this boundary when upgrading Grover or puppeteer.
+
 ## Verification
 
 ```sh
@@ -54,7 +64,8 @@ passing browser evidence.
   test TEST='test/browser_test.rb'`. When enabled, missing prerequisites fail.
   Use platform fonts supplied by `PARADEM_PDF_TEST_FONT`, not application font
   files. Check actual multi-page portrait/landscape output, changing totals,
-  embedded fonts, and header/body/footer positions with Poppler tools.
+  embedded fonts, and header/body/footer positions with Poppler tools. Expect
+  one browser launch per render (or one per batch), not one per conversion.
 - Browser fixtures must reject security-bypass flags. Bound launch, navigation,
   conversion, worker lifetime, and owned-process close/reaping. Forced or failed
   cleanup is a failed proof, even if PDF bytes were produced. Do not signal
@@ -71,9 +82,7 @@ Workers must not spawn additional subagents unless explicitly requested.
 
 ## Commits
 
-The story id is `1`.
-
-- Subjects use `[1] <type>: <description>`.
+- Subjects use `[<story-id>] <type>: <description>`.
 - Explain why the change is needed in the commit body.
 - Commit documentation before the related implementation and test changes.
 - Commit only when the complete currently applicable suite is green.
