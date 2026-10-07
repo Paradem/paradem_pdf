@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    paradem_pdf (0.1.0)
+    paradem_pdf (0.2.0)
       combine_pdf (~> 1.0.31)
       grover (= 1.2.10)
 
