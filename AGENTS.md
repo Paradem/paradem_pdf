@@ -44,6 +44,16 @@ launch, close, and reap with explicit grace periods. Signal only owned children
 security-bypass flags and `GROVER_NO_SANDBOX=true` before launching. Review
 this boundary when upgrading Grover or puppeteer.
 
+## Parallel rendering
+
+A render runs the body first (serially, to learn the page count), then renders
+each header and footer overlay in parallel across a bounded `concurrency` pool
+(stdlib `Thread`/`Queue`), then merges overlays back onto their pages in order.
+Callbacks run on the main thread in page order. Cache `read` and `write` stay
+on the main thread; only conversions run on worker threads. The browser
+endpoint is a conversion-time argument, never a fingerprint or cache input.
+`concurrency` defaults to `[Etc.nprocessors, 4].min`.
+
 ## Verification
 
 ```sh

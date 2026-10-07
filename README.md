@@ -81,6 +81,12 @@ lazily, only when a conversion is actually needed, passes its WebSocket
 endpoint into every Grover conversion, and closes it when the render ends. A
 completed-cache hit returns before any browser launches.
 
+At a high level, a render runs the body first (serially, to learn the page
+count), then renders each header and footer overlay in parallel across a
+bounded thread pool, then merges the overlays back onto their pages in order.
+One Chrome serves every conversion in the render, so memory stays flat instead
+of growing with the page count.
+
 ```ruby
 bytes = document.to_pdf
 ```
