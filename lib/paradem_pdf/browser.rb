@@ -16,18 +16,23 @@ module ParademPdf
       unless timeout.is_a?(Numeric) && timeout.real? && timeout.finite? && timeout.positive?
         raise ArgumentError, "Browser timeout must be finite and positive"
       end
+
       if effective_options
         normalized = effective_options
       else
         normalized, native_root = GroverRenderer.normalize_browser_options(options: options)
         root_path ||= native_root
       end
+
       reject_bypass!(normalized)
+
       launch_timeout = normalized["launchTimeout"]
       if !launch_timeout.nil? && !(launch_timeout.is_a?(Numeric) && launch_timeout.real? && launch_timeout.finite? && launch_timeout.positive?)
         raise ArgumentError, "Browser launch_timeout must be finite and positive"
       end
+
       timeout = [timeout, launch_timeout / 1000.0].max if launch_timeout
+
       args = normalized.fetch("launchArgs", [])
       headless = normalized.dig("debug", "headless")
       headless = true if headless.nil?
@@ -54,6 +59,7 @@ module ParademPdf
       begin
         endpoint = read_endpoint(stdout, timeout)
         raise BrowserError, "Browser launcher failed to report a WebSocket endpoint" unless endpoint
+
         browser.instance_variable_set(:@endpoint, endpoint)
         browser
       ensure
@@ -72,6 +78,7 @@ module ParademPdf
 
     def endpoint
       raise BrowserError, "Browser is closed" if @closed
+
       @endpoint
     end
 
@@ -81,18 +88,24 @@ module ParademPdf
 
     def close
       return if @closed
+
       @closed = true
+
       begin
         @stdin.close unless @stdin.closed?
+
         if @wait_thr.join(CLOSE_GRACE)
           raise BrowserError, "Browser launcher close failed (exit #{@wait_thr.value.exitstatus})" unless @wait_thr.value.success?
+
           return
         end
+
         signal("TERM")
         unless @wait_thr.join(KILL_GRACE)
           signal("KILL")
           raise BrowserError, "Browser launcher could not be reaped" unless @wait_thr.join(KILL_GRACE)
         end
+
         raise BrowserError, "Browser launcher required forced cleanup"
       ensure
         @stdout.close unless @stdout.closed?
@@ -103,6 +116,7 @@ module ParademPdf
 
     def signal(sig)
       return if @wait_thr.join(0)
+
       Process.kill(sig, -@pid)
     rescue Errno::ESRCH
       nil
@@ -110,39 +124,43 @@ module ParademPdf
       raise BrowserError, "Browser launcher cleanup failed: #{error.message}"
     end
 
-    class << self
-      private
+    def self.reject_bypass!(options)
+      raise ArgumentError, "Sandbox bypass is not allowed" if ENV["GROVER_NO_SANDBOX"] == "true"
 
-      def reject_bypass!(options)
-        raise ArgumentError, "Sandbox bypass is not allowed" if ENV["GROVER_NO_SANDBOX"] == "true"
-        if options.key?("launchargs")
-          raise ArgumentError, "Raw browser options must use launch_args, not launchArgs"
-        end
-        args = options.fetch("launchArgs", [])
-        unless args.is_a?(Array) && args.all? { |arg| arg.is_a?(String) }
-          raise ArgumentError, "Browser launch arguments must be an Array of Strings"
-        end
-        if args.any? { |arg| arg.to_s.match?(BYPASS_FLAGS) }
-          raise ArgumentError, "Unsafe browser security arguments"
-        end
+      if options.key?("launchargs")
+        raise ArgumentError, "Raw browser options must use launch_args, not launchArgs"
       end
 
-      def read_endpoint(stdout, timeout)
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
-        buffer = +""
-        loop do
-          remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          return unless remaining.positive? && IO.select([stdout], nil, nil, remaining)
-          chunk = stdout.read_nonblock(4096, exception: false)
-          return if chunk.nil?
-          next if chunk == :wait_readable
-          buffer << chunk
-          while (newline = buffer.index("\n"))
-            line = buffer.slice!(0, newline + 1)
-            return line.strip if line.match?(ENDPOINT_PATTERN)
-          end
+      args = options.fetch("launchArgs", [])
+      unless args.is_a?(Array) && args.all? { |arg| arg.is_a?(String) }
+        raise ArgumentError, "Browser launch arguments must be an Array of Strings"
+      end
+
+      if args.any? { |arg| arg.to_s.match?(BYPASS_FLAGS) }
+        raise ArgumentError, "Unsafe browser security arguments"
+      end
+    end
+    private_class_method :reject_bypass!
+
+    def self.read_endpoint(stdout, timeout)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      buffer = +""
+
+      loop do
+        remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        return unless remaining.positive? && IO.select([stdout], nil, nil, remaining)
+
+        chunk = stdout.read_nonblock(4096, exception: false)
+        return if chunk.nil?
+        next if chunk == :wait_readable
+
+        buffer << chunk
+        while (newline = buffer.index("\n"))
+          line = buffer.slice!(0, newline + 1)
+          return line.strip if line.match?(ENDPOINT_PATTERN)
         end
       end
     end
+    private_class_method :read_endpoint
   end
 end

@@ -22,38 +22,53 @@ module ParademPdf
       @header_margins = header_margins
       @footer_margins = footer_margins
       @cache = cache.nil? ? nil : Cache.new(store: cache)
+
       @cache_namespace = cache_namespace
       @freshness = freshness
       @assets_version = assets_version
       @expires_in = expires_in
-      @concurrency = concurrency.nil? ? [(Etc.nprocessors || 1) - 1, 1].max : concurrency
+      @concurrency = if concurrency.nil?
+        [(Etc.nprocessors || 1) - 1, 1].max
+      else
+        concurrency
+      end
+
       unless @concurrency.is_a?(Integer) && @concurrency.positive?
         raise ArgumentError, "concurrency must be a positive Integer"
       end
+
       {doc_type: doc_type, body_html: body_html, origin: origin, locale: locale}.each do |name, value|
         raise ArgumentError, "#{name} must be a String" unless value.is_a?(String)
       end
+
       [header, footer].each do |callback|
         raise ArgumentError, "Decorations must be callable" unless callback.nil? || callback.respond_to?(:call)
       end
+
       [options, body_margins, header_margins, footer_margins].each do |value|
         raise ArgumentError, "Options and margins must be Hashes" unless value.is_a?(Hash)
       end
+
       @options = options.dup
       @explicit_endpoint = nil
       ["browser_ws_endpoint", "browserWsEndpoint"].each do |key|
         @explicit_endpoint = @options.delete(key) if @options.key?(key)
         @explicit_endpoint = @options.delete(key.to_sym) if @options.key?(key.to_sym)
       end
+
       if @explicit_endpoint && !@explicit_endpoint.to_s.match?(Browser::ENDPOINT_PATTERN)
         raise ArgumentError, "browser_ws_endpoint must be a ws:// or wss:// URL"
       end
+
       @origin = GroverRenderer.normalize_origin(origin)
+
       if @cache
         unless cache_namespace.is_a?(String) && !cache_namespace.strip.empty?
           raise ArgumentError, "Caching requires a nonblank cache_namespace"
         end
+
         raise ArgumentError, "Caching requires explicit freshness and assets_version" if freshness.nil? || assets_version.nil?
+
         @freshness = Cache.canonicalize(freshness)
         @assets_version = Cache.canonicalize(assets_version)
         Cache.validate_expiry(expires_in)
@@ -67,6 +82,7 @@ module ParademPdf
         return browser.endpoint if browser
         return @explicit_endpoint if @explicit_endpoint
         return body_renderer.browser_endpoint if body_renderer.browser_endpoint
+
         owned ||= Browser.open(effective_options: body_renderer.browser_options, root_path: body_renderer.root_path)
         owned.endpoint
       }
@@ -76,6 +92,7 @@ module ParademPdf
         if (hit = @cache.read(key: key))
           return hit
         end
+
         bytes = assemble(body_renderer, provider, require_cache_write)
         @cache.write(key: key, bytes: bytes, expires_in: @expires_in, require_cache_write: require_cache_write)
         return bytes
@@ -88,6 +105,7 @@ module ParademPdf
 
     def self.browser(options: {}, root_path: nil, timeout: nil)
       raise ArgumentError, "Document.browser requires a block" unless block_given?
+
       browser = Browser.open(options: options, root_path: root_path, timeout: timeout)
       yield browser
     ensure
@@ -103,6 +121,7 @@ module ParademPdf
       body.pages.each_with_index do |page, index|
         [["header", @header, @header_margins], ["footer", @footer, @footer_margins]].each do |kind, callback, margins|
           next unless callback
+
           html = callback.call(page: index + 1, total_pages: total_pages)
           jobs << {page: page, kind: kind, index: index, total_pages: total_pages, renderer: renderer(html, margins)}
         end
@@ -119,8 +138,10 @@ module ParademPdf
 
     def self.merge(pdfs)
       raise InvalidPdf, "Provide a nonempty Array of PDFs" unless pdfs.is_a?(Array) && !pdfs.empty?
+
       combined = CombinePDF.new
       pdfs.each { |bytes| combined << parse_pdf(bytes) }
+
       bytes = combined.to_pdf
       parse_pdf(bytes)
       bytes
@@ -130,8 +151,10 @@ module ParademPdf
       unless bytes.is_a?(String) && bytes.b.start_with?("%PDF-")
         raise InvalidPdf, "Expected PDF bytes"
       end
+
       pdf = CombinePDF.parse(bytes)
       raise InvalidPdf, "PDF must contain pages" if pdf.pages.empty?
+
       pdf.pages.each { |page| page_geometry(page) }
       pdf
     rescue CombinePDF::ParsingError, TypeError, ArgumentError => error
@@ -141,13 +164,16 @@ module ParademPdf
     def self.page_geometry(page)
       media = validate_box(page[:MediaBox])
       crop = page[:CropBox].nil? ? media : validate_box(page[:CropBox])
+
       visible = validate_box([[media[0], crop[0]].max, [media[1], crop[1]].max,
         [media[2], crop[2]].min, [media[3], crop[3]].min])
+
       unit = page[:UserUnit]
       unit = 1 if unit.nil?
       unless unit.is_a?(Numeric) && unit.real? && unit.finite? && unit.positive?
         raise InvalidPdf, "UserUnit must be a finite positive number"
       end
+
       [visible, (page[:Rotate] || 0) % 360, unit]
     end
 
@@ -157,6 +183,7 @@ module ParademPdf
           [box[2] - box[0], box[3] - box[1]].all? { |length| length.finite? && length.positive? }
         raise InvalidPdf, "Page boxes must contain four finite coordinates with positive area"
       end
+
       box
     end
     private_class_method :validate_box
@@ -210,6 +237,7 @@ module ParademPdf
             rescue ThreadError
               break
             end
+
             begin
               item[:bytes] = item[:job][:renderer].to_pdf(browser_endpoint: endpoint)
             rescue => error
@@ -218,6 +246,7 @@ module ParademPdf
           end
         end
       end
+
       workers.each(&:join)
 
       if (failed = pending.find { |item| item[:error] })
@@ -237,9 +266,11 @@ module ParademPdf
     def validate_overlay(bytes, page)
       overlay = self.class.parse_pdf(bytes)
       raise InvalidPdf, "Decorations must contain exactly one page" unless overlay.pages.length == 1
+
       unless geometry(page) == geometry(overlay.pages.first)
         raise InvalidPdf, "Decoration geometry and rotation must match the body page"
       end
+
       overlay
     end
 
