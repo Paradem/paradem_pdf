@@ -113,6 +113,11 @@ when needed and may extend the separate resource deadline with
 `readiness_timeout`. Both readiness settings enter completed and decoration
 cache fingerprints, including opt-out and custom-script renders.
 
+The owned launcher does not attach to page targets. Grover's worker connection
+owns page emulation and evaluation. This prevents a second page session from
+resetting the worker's selected media during navigation. The launcher still
+owns browser shutdown and the same bounded process cleanup.
+
 The separate resource proof is opt-in:
 
 ```sh
@@ -125,8 +130,9 @@ BUNDLE_FROZEN=true bundle exec ruby -Ilib -Itest test/readiness_browser_test.rb
 When enabled, missing prerequisites fail rather than skip. Test-only transport
 and observers exercise real Grover conversion, resource failures, custom scripts,
 cache publication, and owned cleanup. Set `PARADEM_PDF_READINESS_ARTIFACTS` to
-retain PDFs and event records outside the gem. The fixture's `--benchmark`
-command runs ten paired serial cold/warm/hot comparisons with identical assets
+retain PDFs and event records outside the gem. Run
+`ruby -Ilib -Itest test/support/readiness_benchmark.rb --benchmark DIRECTORY`
+under the same enabled environment for ten paired serial cold/warm/hot comparisons with identical assets
 and instrumentation. It is development evidence, not production CPU evidence.
 
 ## Managed browser and parallel rendering
