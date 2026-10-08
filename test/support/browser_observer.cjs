@@ -105,12 +105,43 @@ if (process.argv.includes('--self-test')) {
     try { if (closeBrowser) await closeBrowser(); }
     catch (error) { record.error += ': ' + error.message; }
     finally { save(); process.exit(1); }
-  }, 60000);
+  }, process.env.PARADEM_PDF_READINESS_RECORD ? 75000 : 60000);
   const launch = puppeteer.launch.bind(puppeteer);
   puppeteer.launch = async options => {
     validateLaunch(options);
     if (process.env.GROVER_NO_SANDBOX === 'true') throw new Error('Unsafe sandbox environment');
-    const browser = await launch({ ...options, timeout: 20000, protocolTimeout: 20000 });
+  const browser = await launch({ ...options, timeout: 20000, protocolTimeout: 20000 });
+    if (process.env.PARADEM_PDF_READINESS_RECORD) {
+      const child = browser.process();
+      record.lifecycle = [];
+      const event = (name, details = {}) => {
+        record.lifecycle.push({ name, at: Number(process.hrtime.bigint()) / 1e6, ...details });
+        save();
+      };
+      event('launched', { pid: child.pid });
+      child.on('exit', (code, signal) => event('child-exit', { code, signal }));
+      child.on('close', (code, signal) => event('child-close', { code, signal }));
+      child.stdio.forEach((stream, index) => {
+        if (stream) stream.on('close', () => event('stdio-close', { index }));
+      });
+      const close = browser.close.bind(browser);
+      browser.close = async () => {
+        event('close-call', { exitCode: child.exitCode, signalCode: child.signalCode });
+        const snapshot = setTimeout(() => {
+          const { execFileSync } = require('node:child_process');
+          let processes;
+          try {
+            processes = execFileSync('ps', ['-p', `${process.pid},${child.pid}`, '-o', 'pid,ppid,pgid,stat,%cpu,%mem,command'], { encoding: 'utf8', timeout: 250 });
+          } catch (error) { processes = error.message; }
+          event('close-pending', { exitCode: child.exitCode, signalCode: child.signalCode,
+            processes,
+            stdio: child.stdio.map(stream => stream && ({ destroyed: stream.destroyed, readableLength: stream.readableLength })),
+            resources: process.getActiveResourcesInfo() });
+        }, 4500);
+        try { return await close(); }
+        finally { clearTimeout(snapshot); event('close-return', { exitCode: child.exitCode, signalCode: child.signalCode }); }
+      };
+    }
     record.args = options.args || [];
     const owned = { process: () => browser.process(), close: browser.close.bind(browser) };
     let closing;

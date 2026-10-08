@@ -3,6 +3,19 @@ require "paradem_pdf"
 require "json"
 
 class ReadinessScriptTest < Minitest::Test
+  def test_timeout_rejects_javascript_timer_overflow_before_rendering
+    [2**31, 2**32, 10**100].each do |timeout|
+      error = assert_raises(ArgumentError) do
+        ParademPdf::GroverRenderer.new(html: "body", origin: "https://example.test/",
+          options: {}, margins: {}, readiness_timeout: timeout)
+      end
+      assert_includes error.message, "2147483647"
+    end
+    renderer = ParademPdf::GroverRenderer.new(html: "body", origin: "https://example.test/",
+      options: {}, margins: {}, readiness_timeout: 2**31 - 1)
+    assert_includes renderer.browser_options.fetch("executeScript"), "2147483647"
+  end
+
   def run_script(scenario, timeout: 1000)
     script = ParademPdf::GroverRenderer.new(html: "body", origin: "https://example.test/",
       options: {}, margins: {}, readiness_timeout: timeout).browser_options.fetch("executeScript")

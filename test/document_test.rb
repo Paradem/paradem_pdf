@@ -69,7 +69,7 @@ class DocumentTest < Minitest::Test
       error = assert_raises(ArgumentError) { document(cache: store, readiness: value) }
       assert_match(/readiness must be/, error.message)
     end
-    [nil, 0, -1, 1.5, "20000", true].each do |value|
+    [nil, 0, -1, 1.5, "20000", true, 2**31, 10**100].each do |value|
       error = assert_raises(ArgumentError) { document(cache: store, readiness_timeout: value) }
       assert_match(/readiness_timeout must be/, error.message)
     end

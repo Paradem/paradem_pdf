@@ -68,8 +68,8 @@ module ParademPdf
       unless readiness == true || readiness == false
         raise ArgumentError, "readiness must be a boolean"
       end
-      unless timeout.is_a?(Integer) && timeout.positive?
-        raise ArgumentError, "readiness_timeout must be a positive Integer"
+      unless timeout.is_a?(Integer) && (1..2**31 - 1).cover?(timeout)
+        raise ArgumentError, "readiness_timeout must be a positive Integer no greater than 2147483647"
       end
     end
 
