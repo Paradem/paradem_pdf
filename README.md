@@ -267,6 +267,47 @@ The batch opens a browser even if every document is cached. Use ordinary `to_pdf
 for individual completed hits when no browser is needed. Batch launch options go
 on `Document.browser(options: ...)`. See the [API reference](docs/api-reference.md).
 
+## Running tests
+
+Run these commands from the gem checkout's root directory. Install the committed
+Ruby bundle if needed, then run the Minitest suite:
+
+```sh
+BUNDLE_FROZEN=true bundle install
+BUNDLE_FROZEN=true bundle exec rake test
+```
+
+To run one test file:
+
+```sh
+BUNDLE_FROZEN=true bundle exec rake test TEST='test/bootstrap_test.rb'
+```
+
+Real-browser tests are skipped unless explicitly enabled. They require Node.js,
+Puppeteer, Chrome/Chromium, and Poppler. Both the font and Chrome paths must be
+supplied. For macOS with Google Chrome installed in `/Applications`, run:
+
+```sh
+env -u GROVER_NO_SANDBOX -u NODE_OPTIONS \
+PARADEM_PDF_TEST_FONT='/System/Library/Fonts/Supplemental/Arial.ttf' \
+PUPPETEER_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' \
+PARADEM_PDF_BROWSER=1 BUNDLE_FROZEN=true bundle exec rake test TEST='test/browser_test.rb'
+```
+
+Use your platform's font and browser paths on other systems. See
+[browser checks](docs/browser-check.md) for installation and Linux examples.
+When enabled, missing prerequisites fail rather than skip.
+The command unsets inherited sandbox bypass settings and Node preloads for this
+run only; the browser fixture rejects them.
+
+To check Ruby formatting:
+
+```sh
+BUNDLE_FROZEN=true bundle exec standardrb
+```
+
+See [development](docs/development.md) for separate Rails compatibility checks.
+
 ## Technical documentation
 
 - [Architecture](docs/architecture.md)
