@@ -20,6 +20,22 @@ class BootstrapTest < Minitest::Test
     assert_includes spec.files, "lib/paradem_pdf/worker_context.cjs"
   end
 
+  def test_package_declares_approved_mit_license
+    spec = Gem::Specification.load("paradem_pdf.gemspec")
+    assert_equal ["MIT"], spec.licenses
+  end
+
+  def test_package_includes_license_and_linked_technical_guides_without_test_artifacts
+    spec = Gem::Specification.load("paradem_pdf.gemspec")
+    %w[LICENSE README.md docs/architecture.md docs/design.md docs/optimizations.md
+      docs/development.md docs/browser-check.md docs/api-reference.md
+      docs/troubleshooting.md lib/paradem_pdf/browser.js lib/paradem_pdf/readiness.js
+      lib/paradem_pdf/worker_context.cjs].each do |path|
+      assert_includes spec.files, path
+    end
+    refute spec.files.any? { |path| path.match?(%r{\A(?:test/|node_modules/|\.cache/)|\.(?:pdf|ttf|otf)\z}) }
+  end
+
   def test_gemspec_declares_ruby_3_2_minimum_without_an_upper_bound
     output, errors, status = run_ruby(<<~RUBY)
       spec = Gem::Specification.load("paradem_pdf.gemspec")

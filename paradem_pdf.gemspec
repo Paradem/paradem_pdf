@@ -4,9 +4,10 @@ Gem::Specification.new do |spec|
   spec.name = "paradem_pdf"
   spec.version = ParademPdf::VERSION
   spec.authors = ["Paradem"]
+  spec.license = "MIT"
   spec.summary = "Standalone HTML PDF documents with per-page decorations and byte caching"
   spec.required_ruby_version = ">= 3.2"
-  spec.files = Dir["lib/**/*.rb", "lib/**/*.js", "lib/**/*.cjs", "README.md"]
+  spec.files = Dir["lib/**/*.rb", "lib/**/*.js", "lib/**/*.cjs", "docs/**/*.md", "README.md", "LICENSE"]
   spec.require_paths = ["lib"]
 
   spec.add_dependency "grover", "= 1.2.10"
