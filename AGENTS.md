@@ -52,7 +52,7 @@ each header and footer overlay in parallel across a bounded `concurrency` pool
 Callbacks run on the main thread in page order. Cache `read` and `write` stay
 on the main thread; only conversions run on worker threads. The browser
 endpoint is a conversion-time argument, never a fingerprint or cache input.
-`concurrency` defaults to `[Etc.nprocessors, 4].min`.
+`concurrency` defaults to `max(Etc.nprocessors - 1, 1)`.
 
 ## Verification
 

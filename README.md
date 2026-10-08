@@ -121,7 +121,7 @@ concurrency with the constructor option:
 document = ParademPdf::Document.new(..., concurrency: 4)
 ```
 
-`concurrency:` defaults to `[Etc.nprocessors, 4].min` and must be a positive
+`concurrency:` defaults to `max(Etc.nprocessors - 1, 1)` and must be a positive
 Integer. Cache reads and writes stay on the main thread; only conversions run
 on worker threads.
 
