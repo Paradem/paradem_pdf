@@ -8,7 +8,10 @@ module ParademPdf
     def initialize(doc_type:, body_html:, origin:, locale:, header: nil, footer: nil,
       options: {}, body_margins: {}, header_margins: {}, footer_margins: {},
       cache: nil, cache_namespace: nil, freshness: nil, assets_version: nil, expires_in: nil,
-      concurrency: nil)
+      concurrency: nil, readiness: true, readiness_timeout: 20_000)
+      GroverRenderer.validate_readiness(readiness, readiness_timeout)
+      @readiness = readiness
+      @readiness_timeout = readiness_timeout
       @doc_type = doc_type
       @body_html = body_html
       @origin = origin
@@ -241,7 +244,8 @@ module ParademPdf
     end
 
     def renderer(html, margins)
-      GroverRenderer.new(html: html, origin: @origin, options: @options, margins: margins)
+      GroverRenderer.new(html: html, origin: @origin, options: @options, margins: margins,
+        readiness: @readiness, readiness_timeout: @readiness_timeout)
     end
 
     def geometry(page)

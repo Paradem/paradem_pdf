@@ -33,6 +33,80 @@ class GroverRendererTest < Minitest::Test
     assert_includes inputs["html"], 'src="relative.png"'
   end
 
+  def test_defaults_readiness_after_native_normalization
+    r = renderer
+    assert_equal "load", r.browser_options["waitUntil"]
+    assert_kind_of String, r.browser_options["executeScript"]
+    assert_equal true, r.fingerprint_inputs["readiness"]
+    assert_equal 20_000, r.fingerprint_inputs["readiness_timeout"]
+    [nil, false, ""].each do |value|
+      assert_equal "load", renderer(options: {wait_until: value}).browser_options["waitUntil"]
+    end
+  end
+
+  def test_complete_opt_out_preserves_native_waiting_and_explicit_options
+    options = renderer(readiness: false).browser_options
+    refute options.key?("waitUntil")
+    refute options.key?("executeScript")
+    explicit = renderer(readiness: false, options: {wait_until: "networkidle2", execute_script: "custom()"}).browser_options
+    assert_equal "networkidle2", explicit["waitUntil"]
+    assert_equal "custom()", explicit["executeScript"]
+  end
+
+  def test_validates_readiness_policy_and_timeout
+    [nil, 0, "true"].each do |value|
+      error = assert_raises(ArgumentError) { renderer(readiness: value) }
+      assert_match(/readiness must be/, error.message)
+    end
+    [nil, 0, -1, 1.5, "20000", true].each do |value|
+      error = assert_raises(ArgumentError) { renderer(readiness: false, readiness_timeout: value) }
+      assert_match(/readiness_timeout must be/, error.message)
+    end
+  end
+
+  def test_caller_wait_and_script_aliases_preserve_explicit_overrides
+    [{wait_until: "networkidle0", execute_script: "custom()"},
+      {waitUntil: "networkidle0", executeScript: "custom()"}].each do |options|
+      effective = renderer(options: options).browser_options
+      assert_equal "networkidle0", effective["waitUntil"]
+      assert_equal "custom()", effective["executeScript"]
+      refute effective.key?("waituntil")
+      refute effective.key?("executescript")
+    end
+  end
+
+  def test_global_caller_and_metadata_precedence_is_captured_without_mutation
+    global = {wait_until: "networkidle2", execute_script: "global()", request_timeout: 1234,
+              convert_timeout: 2345, launch_timeout: 3456, emulate_media: "screen"}
+    @configuration.options = global.deep_dup
+    assert_equal "networkidle2", renderer.browser_options["waitUntil"]
+    assert_equal "global()", renderer.browser_options["executeScript"]
+    caller = {waitUntil: "domcontentloaded", executeScript: "caller()"}
+    assert_equal "domcontentloaded", renderer(options: caller).browser_options["waitUntil"]
+    assert_equal "caller()", renderer(options: caller).browser_options["executeScript"]
+    r = renderer(options: caller, html: '<meta name="grover-wait_until" content="load"><meta name="grover-execute_script" content="metadata()">')
+    effective = r.fingerprint_inputs["options"]
+    assert_equal "load", effective["waitUntil"]
+    assert_equal "metadata()", effective["executeScript"]
+    assert_equal [1234, 2345, 3456, "screen"], effective.values_at("requestTimeout", "convertTimeout", "launchTimeout", "emulateMedia")
+    assert_equal global, @configuration.options
+    assert_equal({waitUntil: "domcontentloaded", executeScript: "caller()"}, caller)
+    @configuration.options = {execute_script: "later()", wait_until: "networkidle0"}
+    convert_using(->(_kind, _html, options, *) {
+      assert_equal effective, options
+      "bytes"
+    }) { assert_equal "bytes", r.to_pdf }
+  end
+
+  def test_policy_and_timeout_are_fingerprinted_even_with_custom_script_or_opt_out
+    [true, false].each do |enabled|
+      r = renderer(readiness: enabled, readiness_timeout: 123, options: {execute_script: "custom()"})
+      assert_equal enabled, r.fingerprint_inputs["readiness"]
+      assert_equal 123, r.fingerprint_inputs["readiness_timeout"]
+      assert_equal "custom()", r.browser_options["executeScript"]
+    end
+  end
+
   def test_rejects_invalid_origins_before_conversion
     [nil, "", "relative", "file:///tmp/a", "https://", "https://user:pass@example.test", "https://example.test?x", "https://example.test#x", "https://example.test:0", "https://example.test:65536"].each do |origin|
       assert_raises(ArgumentError) { renderer(origin: origin) }

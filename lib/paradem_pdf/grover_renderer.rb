@@ -4,12 +4,17 @@ require "uri"
 module ParademPdf
   # Grover 1.2.10's native normalization and private processor boundary.
   class GroverRenderer
-    def initialize(html:, origin:, options:, margins:)
+    READINESS_SCRIPT = File.read(File.expand_path("readiness.js", __dir__)).freeze
+    private_constant :READINESS_SCRIPT
+
+    def initialize(html:, origin:, options:, margins:, readiness: true, readiness_timeout: 20_000)
+      self.class.validate_readiness(readiness, readiness_timeout)
       raise ArgumentError, "HTML must be a String" unless html.is_a?(String)
       raise ArgumentError, "Options and margins must be Hashes" unless options.is_a?(Hash) && margins.is_a?(Hash)
       @origin = self.class.normalize_origin(origin)
       @html = Grover::HTMLPreprocessor.process(html, @origin, URI.parse(@origin).scheme)
-      aliases = {"displayUrl" => "display_url", "raiseOnRequestFailure" => "raise_on_request_failure"}
+      aliases = {"displayUrl" => "display_url", "raiseOnRequestFailure" => "raise_on_request_failure",
+                 "waitUntil" => "wait_until", "executeScript" => "execute_script"}
       options.each do |key, value|
         control = aliases.fetch(key.to_s, key.to_s)
         next unless ["display_url", "raise_on_request_failure"].include?(control)
@@ -31,6 +36,14 @@ module ParademPdf
       baseline = Grover.new("", **selected_options).send(:normalized_options, path: nil)
       native = Grover.new(@html, **selected_options)
       @effective_options = native.send(:normalized_options, path: nil).deep_dup
+      if readiness
+        if [nil, false, "", 0].include?(@effective_options["waitUntil"])
+          @effective_options["waitUntil"] = "load"
+        end
+        unless @effective_options.key?("executeScript") || @effective_options["javaScriptEnabled"] == false
+          @effective_options["executeScript"] = READINESS_SCRIPT.sub("READINESS_TIMEOUT", readiness_timeout.to_s)
+        end
+      end
       @root_path = native.send(:root_path).deep_dup
       validate_controls(@effective_options)
       unless @effective_options["margin"] == baseline["margin"]
@@ -48,7 +61,16 @@ module ParademPdf
         end
       end
       @inputs = {"html" => @html, "origin" => @origin, "options" => @effective_options,
-                 "root_path" => @root_path}
+                 "root_path" => @root_path, "readiness" => readiness, "readiness_timeout" => readiness_timeout}
+    end
+
+    def self.validate_readiness(readiness, timeout)
+      unless readiness == true || readiness == false
+        raise ArgumentError, "readiness must be a boolean"
+      end
+      unless timeout.is_a?(Integer) && timeout.positive?
+        raise ArgumentError, "readiness_timeout must be a positive Integer"
+      end
     end
 
     def self.normalize_origin(origin)

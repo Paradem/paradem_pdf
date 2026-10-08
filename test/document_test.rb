@@ -63,6 +63,55 @@ class DocumentTest < Minitest::Test
     assert_equal 2, store.writes.length
   end
 
+  def test_readiness_is_validated_before_cache_access
+    store = Object.new
+    [nil, 0, "true"].each do |value|
+      error = assert_raises(ArgumentError) { document(cache: store, readiness: value) }
+      assert_match(/readiness must be/, error.message)
+    end
+    [nil, 0, -1, 1.5, "20000", true].each do |value|
+      error = assert_raises(ArgumentError) { document(cache: store, readiness_timeout: value) }
+      assert_match(/readiness_timeout must be/, error.message)
+    end
+  end
+
+  def test_readiness_policy_and_timeout_invalidate_completed_and_decoration_caches
+    [{}, {execute_script: "custom()"}].each do |options|
+      store = TestCacheStore.new
+      conversions = []
+      convert_using(->(_kind, html, effective, *) {
+        conversions << [html, effective]
+        pdf_bytes(html)
+      }) do
+        [{readiness: true, readiness_timeout: 20_000},
+          {readiness: true, readiness_timeout: 30_000},
+          {readiness: false, readiness_timeout: 30_000},
+          {readiness: false, readiness_timeout: 40_000}].each do |policy|
+          before = conversions.length
+          doc = cached_document(store, options: options, header: ->(**) { "header" }, footer: ->(**) { "footer" }, **policy)
+          doc.to_pdf
+          assert_equal 3, conversions.length - before
+          inputs = conversions.last(3).map(&:last)
+          assert_equal 1, inputs.uniq.length, "body, header and footer must share readiness options"
+          if policy[:readiness]
+            assert_equal "load", inputs.first["waitUntil"]
+            assert_kind_of String, inputs.first["executeScript"]
+          else
+            refute inputs.first.key?("waitUntil")
+            if options.key?(:execute_script)
+              assert_equal options[:execute_script], inputs.first["executeScript"]
+            else
+              refute inputs.first.key?("executeScript")
+            end
+          end
+          doc.to_pdf
+          assert_equal 3, conversions.length - before, "identical render must do zero conversions"
+        end
+      end
+      assert_equal 12, store.writes.length
+    end
+  end
+
   def test_reuses_partial_across_documents_with_same_type_page_total_and_html
     store = TestCacheStore.new
     conversions = []
