@@ -103,6 +103,7 @@ Workers must not spawn additional subagents unless explicitly requested.
 
 ## License and distribution
 
-Management owns the license decision. Do not commit an MIT license or any other
-license declaration until approved. Do not publish, push, or deploy without
-separate authorization. Do not invent a repository URL or approved source rights.
+Management approved the MIT license for story 5, with copyright attributed to
+2026 Paradem Consulting. Keep LICENSE and the gemspec license declaration aligned.
+Do not change the license without approval. Do not publish, push, or deploy
+without separate authorization. Do not invent a repository URL or source rights.
