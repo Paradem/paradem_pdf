@@ -23,7 +23,7 @@ module ParademPdf
       @freshness = freshness
       @assets_version = assets_version
       @expires_in = expires_in
-      @concurrency = concurrency.nil? ? [Etc.nprocessors || 1, 4].min : concurrency
+      @concurrency = concurrency.nil? ? [(Etc.nprocessors || 1) - 1, 1].max : concurrency
       unless @concurrency.is_a?(Integer) && @concurrency.positive?
         raise ArgumentError, "concurrency must be a positive Integer"
       end

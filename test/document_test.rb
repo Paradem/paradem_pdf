@@ -684,8 +684,8 @@ class DocumentTest < Minitest::Test
     assert_equal 0, opens
   end
 
-  def test_concurrency_defaults_to_min_of_processors_and_four
-    {8 => 4, 2 => 2, nil => 1}.each do |processors, expected|
+  def test_concurrency_defaults_to_processors_minus_one_with_minimum_one
+    {8 => 7, 4 => 3, 2 => 1, 1 => 1, 0 => 1, nil => 1}.each do |processors, expected|
       Etc.stub(:nprocessors, processors) do
         assert_equal expected, document.instance_variable_get(:@concurrency)
       end
