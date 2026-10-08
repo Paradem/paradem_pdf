@@ -80,8 +80,10 @@ global and caller margins. Conflicting metadata raises before conversion.
 ### Resource readiness
 
 `Document.new` and `GroverRenderer.new` default to `readiness: true` and
-`readiness_timeout: 20_000`. The timeout must be a positive Integer in
-milliseconds, even when readiness is disabled. The policy applies to the body
+`readiness_timeout: 20_000`. The timeout must be an Integer from 1 through
+2,147,483,647 milliseconds, even when readiness is disabled. Larger values
+overflow JavaScript timers and are rejected before rendering or cache work.
+The policy applies to the body
 and each header and footer.
 
 After Grover normalizes global options, caller options, and HTML metadata,
@@ -110,6 +112,22 @@ timeouts. Applications select media with `options: {emulate_media: "print"}`
 when needed and may extend the separate resource deadline with
 `readiness_timeout`. Both readiness settings enter completed and decoration
 cache fingerprints, including opt-out and custom-script renders.
+
+The separate resource proof is opt-in:
+
+```sh
+PARADEM_PDF_READINESS_BROWSER=1 \
+PUPPETEER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+PARADEM_PDF_TEST_FONT="/System/Library/Fonts/Supplemental/Arial.ttf" \
+BUNDLE_FROZEN=true bundle exec ruby -Ilib -Itest test/readiness_browser_test.rb
+```
+
+When enabled, missing prerequisites fail rather than skip. Test-only transport
+and observers exercise real Grover conversion, resource failures, custom scripts,
+cache publication, and owned cleanup. Set `PARADEM_PDF_READINESS_ARTIFACTS` to
+retain PDFs and event records outside the gem. The fixture's `--benchmark`
+command runs ten paired serial cold/warm/hot comparisons with identical assets
+and instrumentation. It is development evidence, not production CPU evidence.
 
 ## Managed browser and parallel rendering
 
