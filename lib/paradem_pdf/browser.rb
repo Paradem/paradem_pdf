@@ -24,27 +24,7 @@ module ParademPdf
         root_path ||= native_root
       end
 
-      reject_bypass!(normalized)
-
-      launch_timeout = normalized["launchTimeout"]
-      if !launch_timeout.nil? && !(launch_timeout.is_a?(Numeric) && launch_timeout.real? && launch_timeout.finite? && launch_timeout.positive?)
-        raise ArgumentError, "Browser launch_timeout must be finite and positive"
-      end
-
-      timeout = [timeout, launch_timeout / 1000.0].max if launch_timeout
-
-      args = normalized.fetch("launchArgs", [])
-      headless = normalized.dig("debug", "headless")
-      headless = true if headless.nil?
-
-      payload = {
-        "executablePath" => normalized["executablePath"],
-        "args" => args,
-        "browser" => normalized["browser"],
-        "timeout" => normalized["launchTimeout"],
-        "headless" => headless,
-        "devtools" => normalized.dig("debug", "devtools")
-      }.compact
+      payload, timeout = prepare_launch(normalized, timeout)
 
       root_path ||= Dir.pwd
       launcher_path = File.expand_path("browser.js", __dir__)
@@ -100,19 +80,23 @@ module ParademPdf
           return
         end
 
-        signal("TERM")
-        unless @wait_thr.join(KILL_GRACE)
-          signal("KILL")
-          raise BrowserError, "Browser launcher could not be reaped" unless @wait_thr.join(KILL_GRACE)
-        end
-
-        raise BrowserError, "Browser launcher required forced cleanup"
+        force_cleanup
       ensure
         @stdout.close unless @stdout.closed?
       end
     end
 
     private
+
+    def force_cleanup
+      signal("TERM")
+      unless @wait_thr.join(KILL_GRACE)
+        signal("KILL")
+        raise BrowserError, "Browser launcher could not be reaped" unless @wait_thr.join(KILL_GRACE)
+      end
+
+      raise BrowserError, "Browser launcher required forced cleanup"
+    end
 
     def signal(sig)
       return if @wait_thr.join(0)
@@ -123,6 +107,32 @@ module ParademPdf
     rescue Errno::EPERM => error
       raise BrowserError, "Browser launcher cleanup failed: #{error.message}"
     end
+
+    def self.prepare_launch(normalized, timeout)
+      reject_bypass!(normalized)
+
+      launch_timeout = normalized["launchTimeout"]
+      if !launch_timeout.nil? && !(launch_timeout.is_a?(Numeric) && launch_timeout.real? && launch_timeout.finite? && launch_timeout.positive?)
+        raise ArgumentError, "Browser launch_timeout must be finite and positive"
+      end
+
+      timeout = [timeout, launch_timeout / 1000.0].max if launch_timeout
+
+      args = normalized.fetch("launchArgs", [])
+      headless = normalized.dig("debug", "headless")
+      headless = true if headless.nil?
+
+      payload = {
+        "executablePath" => normalized["executablePath"],
+        "args" => args,
+        "browser" => normalized["browser"],
+        "timeout" => normalized["launchTimeout"],
+        "headless" => headless,
+        "devtools" => normalized.dig("debug", "devtools")
+      }.compact
+      [payload, timeout]
+    end
+    private_class_method :prepare_launch
 
     def self.reject_bypass!(options)
       raise ArgumentError, "Sandbox bypass is not allowed" if ENV["GROVER_NO_SANDBOX"] == "true"

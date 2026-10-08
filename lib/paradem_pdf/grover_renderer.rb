@@ -31,31 +31,7 @@ module ParademPdf
       @origin = self.class.normalize_origin(origin)
       @html = Grover::HTMLPreprocessor.process(html, @origin, URI.parse(@origin).scheme)
 
-      aliases = {"displayUrl" => "display_url", "raiseOnRequestFailure" => "raise_on_request_failure",
-                 "waitUntil" => "wait_until", "executeScript" => "execute_script"}
-      options.each do |key, value|
-        control = aliases.fetch(key.to_s, key.to_s)
-        next unless ["display_url", "raise_on_request_failure"].include?(control)
-
-        effective = Grover.new("", **{control => value}).send(:normalized_options, path: nil)
-        validate_controls(effective, optional: true, controls: [control])
-      end
-
-      caller_options = Grover::Utils.deep_stringify_keys(options)
-      aliases.each do |native, snake|
-        caller_options[snake] = caller_options.delete(native) if caller_options.key?(native)
-      end
-
-      if caller_options.key?("margin") && !caller_options["margin"].is_a?(Hash)
-        raise ArgumentError, "The margin option must be a Hash"
-      end
-
-      selected_options = caller_options.merge("display_url" => @origin, "raise_on_request_failure" => true)
-      selected_options["margin"] = Grover::Utils.deep_merge!(
-        Grover::Utils.deep_stringify_keys(caller_options.fetch("margin", {})),
-        Grover::Utils.deep_stringify_keys(margins)
-      )
-
+      selected_options = prepare_options(options, margins)
       baseline = Grover.new("", **selected_options).send(:normalized_options, path: nil)
       native = Grover.new(@html, **selected_options)
       @effective_options = native.send(:normalized_options, path: nil).deep_dup
@@ -78,17 +54,7 @@ module ParademPdf
       end
 
       @browser_endpoint = @effective_options.delete("browserWsEndpoint")
-      if @browser_endpoint
-        parsed = Nokogiri::HTML(@html)
-        endpoint_tags = parsed.xpath("//meta").select do |meta|
-          meta["name"].to_s[/#{Grover.configuration.meta_tag_prefix}([a-z_-]+)/, 1] == "browser_ws_endpoint"
-        end
-
-        unless endpoint_tags.empty?
-          endpoint_tags.each(&:remove)
-          @html = parsed.to_html
-        end
-      end
+      @html = remove_endpoint_metadata(@html) if @browser_endpoint
 
       @inputs = {"html" => @html, "origin" => @origin, "options" => @effective_options,
                  "root_path" => @root_path, "readiness" => readiness, "readiness_timeout" => readiness_timeout}
@@ -150,6 +116,46 @@ module ParademPdf
     end
 
     private
+
+    def prepare_options(options, margins)
+      aliases = {"displayUrl" => "display_url", "raiseOnRequestFailure" => "raise_on_request_failure",
+                 "waitUntil" => "wait_until", "executeScript" => "execute_script"}
+      options.each do |key, value|
+        control = aliases.fetch(key.to_s, key.to_s)
+        next unless ["display_url", "raise_on_request_failure"].include?(control)
+
+        effective = Grover.new("", **{control => value}).send(:normalized_options, path: nil)
+        validate_controls(effective, optional: true, controls: [control])
+      end
+
+      caller_options = Grover::Utils.deep_stringify_keys(options)
+      aliases.each do |native, snake|
+        caller_options[snake] = caller_options.delete(native) if caller_options.key?(native)
+      end
+
+      if caller_options.key?("margin") && !caller_options["margin"].is_a?(Hash)
+        raise ArgumentError, "The margin option must be a Hash"
+      end
+
+      selected_options = caller_options.merge("display_url" => @origin, "raise_on_request_failure" => true)
+      selected_options["margin"] = Grover::Utils.deep_merge!(
+        Grover::Utils.deep_stringify_keys(caller_options.fetch("margin", {})),
+        Grover::Utils.deep_stringify_keys(margins)
+      )
+      selected_options
+    end
+
+    def remove_endpoint_metadata(html)
+      parsed = Nokogiri::HTML(html)
+      endpoint_tags = parsed.xpath("//meta").select do |meta|
+        meta["name"].to_s[/#{Grover.configuration.meta_tag_prefix}([a-z_-]+)/, 1] == "browser_ws_endpoint"
+      end
+
+      return html if endpoint_tags.empty?
+
+      endpoint_tags.each(&:remove)
+      parsed.to_html
+    end
 
     def validate_controls(effective, optional: false, controls: [])
       if (!optional || controls.include?("display_url")) && effective["displayUrl"] != @origin
