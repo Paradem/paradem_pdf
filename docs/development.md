@@ -18,6 +18,50 @@ Human-facing prose is reviewed against code and tested examples rather than
 assertions on its exact wording. See [AGENTS.md](../AGENTS.md) for repository
 workflow and commit rules.
 
+## Implementation readability
+
+Story 6 is a behavior-preserving refactor against baseline `6c4f620`. Use the
+existing regression tests unchanged. Do not add failing behavior tests for this
+story. Future behavior changes still require the TDD workflow above.
+
+- Choose conditions by meaning and readability in the implementation files
+  covered by story 6. Prefer positive `if` conditions where natural and `unless`
+  for clear negative guards. Keep related conditions consistent; do not
+  mechanically negate predicates to use one keyword. Use simple ternaries only
+  where clearer than verbose branches. Retain type-dispatch `case`.
+- Use `def self.method` with `private_class_method` for private class methods.
+  Do not use singleton-class blocks.
+- Keep short guards and add blank lines between logical steps. Preserve complete
+  negated expressions and evaluation order. Do not invent predicates or extra
+  state just to change syntax or shorten methods.
+- Preserve public methods, visibility, keyword arguments, defaults, truthiness,
+  short-circuit evaluation, validation order, and error messages.
+- Keep rescue classes and scopes unchanged. Preserve propagated exception
+  identity, exception causes, and cleanup failure precedence. Keep owned-browser
+  cleanup in `ensure` blocks.
+- Preserve rendering order, browser ownership, and timeout bounds. Keep callbacks
+  and cache operations on the calling thread. Only conversions run on workers.
+- Preserve cache inputs, canonicalization, HTML bytes, readiness-script bytes,
+  and `RENDER_VERSION`. Keep Grover normalization and private calls in
+  `GroverRenderer`. Defer `readiness.js` changes and the uncovered JavaScript
+  fallback refactor.
+
+Do not change dependencies, locks, the gem version, package lists, or tests for
+this refactor. Run the frozen core suite and lint, both Rails compatibility
+suites and lint, and both browser gates before implementation commits. Confirm
+that tests still match the baseline:
+
+```sh
+git diff --exit-code 6c4f620 -- test/
+git status --short --untracked-files=all -- test/
+```
+
+Both commands must produce no output. Missing prerequisites block a required
+gate and the commit. Do not silently install dependencies or download browsers.
+Commit this documentation before implementation. After documentation-only edits,
+rerun core tests and lint. Baseline Rails and browser results can be reused only
+while implementation, tests, dependencies, and environment remain unchanged.
+
 ## Standalone core
 
 The root [Gemfile](../Gemfile) does not depend on Rails. Run the full root suite
