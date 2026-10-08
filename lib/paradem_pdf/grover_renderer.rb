@@ -7,6 +7,21 @@ module ParademPdf
     READINESS_SCRIPT = File.read(File.expand_path("readiness.js", __dir__)).freeze
     private_constant :READINESS_SCRIPT
 
+    # Grover 1.2.10 has no per-processor runtime override. Scope the preload to
+    # this processor instance; never mutate configuration shared by Ruby threads.
+    module IsolatedWorker
+      private
+
+      def spawn_process
+        worker = File.join(File.dirname(Grover::Processor.instance_method(:spawn_process).source_location.first), "js/processor.cjs")
+        @stdin, @stdout, @stderr, @wait_thr = Open3.popen3(
+          Grover.configuration.node_env_vars, *Grover.configuration.js_runtime_bin,
+          "--require", File.expand_path("worker_context.cjs", __dir__), worker, chdir: app_root
+        )
+      end
+    end
+    private_constant :IsolatedWorker
+
     def initialize(html:, origin:, options:, margins:, readiness: true, readiness_timeout: 20_000)
       self.class.validate_readiness(readiness, readiness_timeout)
       raise ArgumentError, "HTML must be a String" unless html.is_a?(String)
@@ -108,7 +123,9 @@ module ParademPdf
       options = @effective_options.deep_dup
       browser_endpoint ||= @browser_endpoint
       options["browserWsEndpoint"] = browser_endpoint if browser_endpoint
-      native.send(:processor).convert(:pdf, @html, options)
+      processor = native.send(:processor)
+      processor.extend(IsolatedWorker) if browser_endpoint
+      processor.convert(:pdf, @html, options)
     end
 
     private

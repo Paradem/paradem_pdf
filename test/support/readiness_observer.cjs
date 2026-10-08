@@ -15,10 +15,18 @@ if (process.env.PARADEM_PDF_READINESS_TRACE === '1') {
   const { Connection } = require('puppeteer-core/lib/cjs/puppeteer/cdp/Connection.js');
   const path = `${root}/protocol-${process.pid}.jsonl`;
   const role = process.env.PARADEM_PDF_BROWSER_LAUNCHER === '1' ? 'owner' : 'worker';
+  const onMessage = Connection.prototype.onMessage;
+  Connection.prototype.onMessage = function (message) {
+    const incoming = JSON.parse(message);
+    if (incoming.method === 'Target.attachedToTarget') {
+      fs.appendFileSync(path, JSON.stringify({ role, at: now(), incoming }) + '\n');
+    }
+    return onMessage.call(this, message);
+  };
   for (const klass of [CdpCDPSession, Connection]) {
     const send = klass.prototype.send;
     klass.prototype.send = function (method, params, ...args) {
-      if (!['Emulation.setEmulatedMedia', 'Target.setAutoAttach', 'Target.attachToTarget', 'Target.detachFromTarget', 'Browser.close'].includes(method)) {
+      if (!['Emulation.setEmulatedMedia', 'Target.createBrowserContext', 'Target.createTarget', 'Target.setAutoAttach', 'Target.attachToTarget', 'Target.detachFromTarget', 'Browser.close'].includes(method)) {
         return send.call(this, method, params, ...args);
       }
       const entry = { role, method, params, at: now(), session: typeof this.id === 'function' ? this.id() : 'connection' };
@@ -63,7 +71,7 @@ if (process.env.PARADEM_PDF_BROWSER_LAUNCHER === '1') {
     browser.createBrowserContext = async () => {
       const context = await create();
       record.contexts++;
-      event('context-open');
+      event('context-open', { id: context.id });
       const close = context.close.bind(context);
       context.close = async () => {
         try { return await close(); }

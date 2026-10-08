@@ -39,7 +39,7 @@ module ReadinessFixture
                                          "PARADEM_PDF_TEST_FONT" => ENV.fetch("PARADEM_PDF_TEST_FONT")}
   end
 
-  def self.document(store, scenario: "healthy", landscape: false, unrelated: false, readiness: true, timeout: 20_000, overrides: {}, decoration_failure: false, benchmark: false)
+  def self.document(store, scenario: "healthy", landscape: false, unrelated: false, readiness: true, timeout: 20_000, overrides: {}, decoration_failure: false, benchmark: false, concurrency: 1)
     font = [File.binread(ENV.fetch("PARADEM_PDF_TEST_FONT"))].pack("m0")
     ParademPdf::Document.new(doc_type: "readiness-fixture", origin: "https://documents.example.test/", locale: "en",
       body_html: html(decoration_failure ? "healthy" : scenario, unrelated: unrelated, lazy_offscreen: !benchmark),
@@ -55,7 +55,7 @@ module ReadinessFixture
       body_margins: {top: "25mm", bottom: "25mm", left: "15mm", right: "15mm"},
       header_margins: {top: "10mm", bottom: "0mm", left: "15mm", right: "15mm"},
       footer_margins: {top: "0mm", bottom: "10mm", left: "15mm", right: "15mm"},
-      concurrency: 1, cache: store, cache_namespace: "readiness-fixture", freshness: "fixture-v1",
+      concurrency: concurrency, cache: store, cache_namespace: "readiness-fixture", freshness: "fixture-v1",
       assets_version: Digest::SHA256.file(ENV.fetch("PARADEM_PDF_TEST_FONT")).hexdigest, expires_in: 600)
   end
 
@@ -93,7 +93,8 @@ module ReadinessFixture
     resources = "bad-image" if decoration_failure
     doc = document(store, scenario: resources, landscape: landscape,
       unrelated: %w[held idle-control].include?(scenario), readiness: readiness,
-      timeout: (scenario == "stall") ? 350 : 20_000, overrides: overrides, decoration_failure: decoration_failure, benchmark: scenario == "optout")
+      timeout: (scenario == "stall") ? 350 : 20_000, overrides: overrides, decoration_failure: decoration_failure, benchmark: scenario == "optout",
+      concurrency: %w[custom screen].include?(scenario) ? 4 : 1)
     error = nil
     begin
       bytes = doc.to_pdf
@@ -115,6 +116,7 @@ module ReadinessFixture
     else
       raise "Unexpected render failure: #{error}" if error
       raise "Wrong actual conversion count" unless conversions.length == 5
+      raise "Media override lost on decoration" unless conversions.all? { |record| record.dig("snapshot", "print") == selected_print }
       body = conversions.find { |record| record.fetch("snapshot").fetch("images").length == 4 }
       raise "No body observation" unless body
       snapshot = body.fetch("snapshot")
@@ -195,10 +197,75 @@ module ReadinessFixture
     raise failures.join("\n") unless failures.empty?
     puts JSON.generate(iterations: 10, conversions: records(directory).length, failures: failures)
   end
+
+  def self.parallel_media_regression(directory)
+    configure(directory)
+    runtime = Grover.configuration.js_runtime_bin.dup
+    environment = Grover.configuration.node_env_vars.dup
+    failures = []
+    store = TestCacheStore.new
+    store.write("independent", "existing", expires_in: 600)
+    10.times do |iteration|
+      ParademPdf::Document.browser(options: options) do |browser|
+        %w[healthy bad-font].each do |scenario|
+          before = records(directory).length
+          writes = store.writes.length
+          doc = ParademPdf::Document.new(doc_type: "parallel-#{iteration}-#{scenario}",
+            body_html: html("healthy", lazy_offscreen: false), origin: "https://documents.example.test/", locale: "en",
+            header: ->(page:, total_pages:) { html("healthy", total: 1, lazy_offscreen: false) },
+            footer: ->(page:, total_pages:) { html(scenario, total: 1, lazy_offscreen: false) },
+            options: options, concurrency: 4, cache: store, cache_namespace: "parallel-media", freshness: "fixture-v1",
+            assets_version: "platform-font", expires_in: 600)
+          error = nil
+          begin
+            bytes = doc.to_pdf(browser: browser)
+          rescue => exception
+            error = exception.message
+          end
+          conversions = records(directory).drop(before)
+          conversions.each do |record|
+            phases = [record["media_after_load"], record["media_after_readiness"]]
+            phases << record.dig("snapshot", "print") if record["snapshot"]
+            failures << "#{iteration}/#{scenario}: selected print lost: #{phases.inspect}" unless phases.all?(true)
+          end
+          intervals = conversions.map do |record|
+            events = record.fetch("events")
+            [events.find { |event| event["name"] == "context-open" }.fetch("at"),
+              events.find { |event| event["name"] == "context-close" }.fetch("at")]
+          end
+          failures << "#{iteration}/#{scenario}: no real parallel contexts" unless intervals.combination(2).any? { |a, b| a[0] < b[1] && b[0] < a[1] }
+          if scenario == "healthy"
+            failures << "#{iteration}/healthy: #{error}" if error
+            failures << "#{iteration}/healthy: missing conversions" unless conversions.length == 5
+            if bytes
+              path = File.join(directory, "healthy-#{iteration}.pdf")
+              File.binwrite(path, bytes)
+              BrowserFixture.check_fonts(path)
+              failures << "#{iteration}/healthy: wrong pages" unless CombinePDF.parse(bytes).pages.length == 2
+              count = records(directory).length
+              failures << "#{iteration}/healthy: hot cache changed" unless doc.to_pdf(browser: browser) == bytes && records(directory).length == count
+            end
+          else
+            corrupt = conversions.select { |record| record["events"].any? { |event| event["scenario"] == "bad-font" } }
+            failures << "#{iteration}/bad-font: corrupt footer printed or cached" unless error&.include?("PDF font failed") && store.writes.length == writes && !corrupt.empty? && corrupt.all? { |record| !record["snapshot"] }
+          end
+          failures << "independent entry changed" unless store.entries["independent"] == ["existing", 600]
+          File.write(File.join(directory, "parallel-media-regression.json"), JSON.pretty_generate(iterations: iteration + 1, conversions: records(directory).length, failures: failures))
+        end
+      end
+    end
+    check_records(directory, launches: 10)
+    raise "Global runtime configuration mutated" unless Grover.configuration.js_runtime_bin == runtime && Grover.configuration.node_env_vars == environment
+    result = {iterations: 10, conversions: records(directory).length, failures: failures}
+    File.write(File.join(directory, "parallel-media-regression.json"), JSON.pretty_generate(result))
+    raise failures.join("\n") unless failures.empty?
+    puts JSON.generate(result)
+  end
 end
 
 if $PROGRAM_NAME == __FILE__
   abort "Readiness fixture disabled" unless ENV["PARADEM_PDF_READINESS_BROWSER"] == "1"
   ReadinessFixture.run(ARGV.fetch(1), ARGV.fetch(2)) if ARGV.first == "--render"
   ReadinessFixture.media_regression(ARGV.fetch(1)) if ARGV.first == "--media-regression"
+  ReadinessFixture.parallel_media_regression(ARGV.fetch(1)) if ARGV.first == "--parallel-media-regression"
 end

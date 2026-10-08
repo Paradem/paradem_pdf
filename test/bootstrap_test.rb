@@ -15,6 +15,11 @@ class BootstrapTest < Minitest::Test
     assert_equal "standalone\n", output
   end
 
+  def test_package_includes_native_worker_preload
+    spec = Gem::Specification.load("paradem_pdf.gemspec")
+    assert_includes spec.files, "lib/paradem_pdf/worker_context.cjs"
+  end
+
   def test_gemspec_declares_ruby_3_2_minimum_without_an_upper_bound
     output, errors, status = run_ruby(<<~RUBY)
       spec = Gem::Specification.load("paradem_pdf.gemspec")

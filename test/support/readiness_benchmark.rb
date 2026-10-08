@@ -97,8 +97,13 @@ module ReadinessBenchmark
     result = {summary: summary, reductions_percent: reductions, paired_warm_percent: distribution(paired), appearances: appearances,
               appearance_gate: appearances.all? { |entry| entry[:matches].values.all? },
               warm_target_gate: reductions[:warm] >= 10, concurrency: 1, instrumentation: "identical test-only observer; monotonic milliseconds; summed conversion phases"}
+    finish(directory, result)
+  end
+
+  def self.finish(directory, result)
     File.write(File.join(directory, "benchmark.json"), JSON.pretty_generate(result))
     puts JSON.generate(result)
+    abort "Benchmark gates failed" unless result.fetch(:appearance_gate) && result.fetch(:warm_target_gate)
   end
 end
 
