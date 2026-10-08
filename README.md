@@ -77,6 +77,40 @@ Caller options and HTML metadata cannot override the required origin or
 request-failure policy. Explicit per-part margins override corresponding
 global and caller margins. Conflicting metadata raises before conversion.
 
+### Resource readiness
+
+`Document.new` and `GroverRenderer.new` default to `readiness: true` and
+`readiness_timeout: 20_000`. The timeout must be a positive Integer in
+milliseconds, even when readiness is disabled. The policy applies to the body
+and each header and footer.
+
+After Grover normalizes global options, caller options, and HTML metadata,
+readiness supplies `wait_until: "load"` only if no effective wait is set.
+The awaited `execute_script` hook promotes lazy images to eager loading,
+decodes images, forces layout in the selected media, and waits for fonts.
+Failed image decoding, missing intrinsic image width, and failed font faces
+raise. Unused unloaded font faces are allowed. The resource deadline raises
+`PDF readiness timeout`; other resource errors identify `PDF image failed`
+or `PDF font failed`. Failed renders do not publish incomplete PDFs to cache.
+
+An explicit global, caller, or metadata `execute_script` replaces the generic
+resource hook. The gem preserves that script unchanged and Grover awaits it
+once. Its author owns resource readiness. The independent `load` default still
+applies unless a wait is explicitly set. Caller `waitUntil` and `executeScript`
+aliases are also accepted. Grover's JavaScript-disabled control remains in
+effect and disables the resource hook.
+
+Use `readiness: false` for complete opt-out. This adds neither the wait default
+nor the resource script and restores native Grover waiting. Explicit waits
+and scripts still apply. Asynchronous-page callers own their readiness policy;
+the generic hook does not wait for arbitrary post-load mutations or fetches.
+
+The gem does not force print media or change navigation, conversion, or launch
+timeouts. Applications select media with `options: {emulate_media: "print"}`
+when needed and may extend the separate resource deadline with
+`readiness_timeout`. Both readiness settings enter completed and decoration
+cache fingerprints, including opt-out and custom-script renders.
+
 ## Managed browser and parallel rendering
 
 Each render owns one headless Chrome. `Document#to_pdf` opens the browser
