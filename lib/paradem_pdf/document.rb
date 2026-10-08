@@ -67,7 +67,9 @@ module ParademPdf
           raise ArgumentError, "Caching requires a nonblank cache_namespace"
         end
 
-        raise ArgumentError, "Caching requires explicit freshness and assets_version" if freshness.nil? || assets_version.nil?
+        if freshness.nil? || assets_version.nil?
+          raise ArgumentError, "Caching requires explicit freshness and assets_version"
+        end
 
         @freshness = Cache.canonicalize(freshness)
         @assets_version = Cache.canonicalize(assets_version)
@@ -87,18 +89,17 @@ module ParademPdf
         owned.endpoint
       }
 
-      if @cache
-        key = @cache.key(inputs: completed_inputs(body_renderer))
-        if (hit = @cache.read(key: key))
-          return hit
-        end
-
-        bytes = assemble(body_renderer, provider, require_cache_write)
-        @cache.write(key: key, bytes: bytes, expires_in: @expires_in, require_cache_write: require_cache_write)
-        return bytes
+      unless @cache
+        return assemble(body_renderer, provider, require_cache_write)
       end
 
-      assemble(body_renderer, provider, require_cache_write)
+      key = @cache.key(inputs: completed_inputs(body_renderer))
+      cached = @cache.read(key: key)
+      return cached if cached
+
+      bytes = assemble(body_renderer, provider, require_cache_write)
+      @cache.write(key: key, bytes: bytes, expires_in: @expires_in, require_cache_write: require_cache_write)
+      bytes
     ensure
       owned&.close
     end
@@ -115,18 +116,8 @@ module ParademPdf
     def assemble(body_renderer, provider, require_cache_write)
       endpoint = provider.call
       body = self.class.parse_pdf(body_renderer.to_pdf(browser_endpoint: endpoint))
-      total_pages = body.pages.length
 
-      jobs = []
-      body.pages.each_with_index do |page, index|
-        [["header", @header, @header_margins], ["footer", @footer, @footer_margins]].each do |kind, callback, margins|
-          next unless callback
-
-          html = callback.call(page: index + 1, total_pages: total_pages)
-          jobs << {page: page, kind: kind, index: index, total_pages: total_pages, renderer: renderer(html, margins)}
-        end
-      end
-
+      jobs = decoration_jobs(body.pages)
       overlays = resolve_overlays(jobs, endpoint, require_cache_write)
       jobs.each_with_index { |job, position| job[:page] << overlays[position].pages.first }
 
@@ -209,23 +200,50 @@ module ParademPdf
         "rendering" => job[:renderer].fingerprint_inputs)
     end
 
+    def decoration_jobs(pages)
+      total_pages = pages.length
+      jobs = []
+      pages.each_with_index do |page, index|
+        [["header", @header, @header_margins], ["footer", @footer, @footer_margins]].each do |kind, callback, margins|
+          next unless callback
+
+          html = callback.call(page: index + 1, total_pages: total_pages)
+          jobs << {page: page, kind: kind, index: index, total_pages: total_pages, renderer: renderer(html, margins)}
+        end
+      end
+
+      jobs
+    end
+
     def resolve_overlays(jobs, endpoint, require_cache_write)
       results = Array.new(jobs.length)
       pending = []
 
       jobs.each_with_index do |job, position|
-        if @cache
-          key = @cache.key(inputs: overlay_inputs(job))
-          if (hit = @cache.read(key: key, expected_pages: 1))
-            results[position] = validate_overlay(hit, job[:page])
-          else
-            pending << {position: position, job: job, key: key}
-          end
-        else
-          pending << {position: position, job: job, key: nil}
+        key = nil
+        key = @cache.key(inputs: overlay_inputs(job)) if @cache
+
+        if @cache && (hit = @cache.read(key: key, expected_pages: 1))
+          results[position] = validate_overlay(hit, job[:page])
+          next
         end
+
+        pending << {position: position, job: job, key: key}
       end
 
+      convert_pending_overlays(pending, endpoint)
+
+      pending.each do |item|
+        bytes = item[:bytes]
+        results[item[:position]] = validate_overlay(bytes, item[:job][:page])
+        @cache&.write(key: item[:key], bytes: bytes, expires_in: @expires_in,
+          expected_pages: 1, require_cache_write: require_cache_write)
+      end
+
+      results
+    end
+
+    def convert_pending_overlays(pending, endpoint)
       queue = Queue.new
       pending.each { |item| queue << item }
 
@@ -252,15 +270,6 @@ module ParademPdf
       if (failed = pending.find { |item| item[:error] })
         raise failed[:error]
       end
-
-      pending.each do |item|
-        bytes = item[:bytes]
-        results[item[:position]] = validate_overlay(bytes, item[:job][:page])
-        @cache&.write(key: item[:key], bytes: bytes, expires_in: @expires_in,
-          expected_pages: 1, require_cache_write: require_cache_write)
-      end
-
-      results
     end
 
     def validate_overlay(bytes, page)
