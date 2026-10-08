@@ -692,37 +692,6 @@ class DocumentTest < Minitest::Test
     end
   end
 
-  def test_overlays_convert_concurrently
-    body_bytes = pdf_bytes("one", "two", "three", "four")
-    footer_bytes = pdf_bytes("footer")
-    in_flight = 0
-    max_in_flight = 0
-    mutex = Mutex.new
-    factory = Grover::Processor.method(:new)
-    Grover::Processor.stub(:new, ->(root) {
-      processor = factory.call(root)
-      processor.define_singleton_method(:convert) do |_kind, html, _options|
-        if html == "body"
-          body_bytes
-        else
-          mutex.synchronize do
-            in_flight += 1
-            max_in_flight = [max_in_flight, in_flight].max
-          end
-          sleep 0.05
-          mutex.synchronize { in_flight -= 1 }
-          footer_bytes
-        end
-      end
-      processor
-    }) do
-      ParademPdf::Browser.stub(:open, ->(**) { FakeBrowser.new }) do
-        document(concurrency: 4, footer: ->(page:, total_pages:) { "footer #{page}/#{total_pages}" }).to_pdf
-      end
-    end
-    assert_operator max_in_flight, :>, 1
-  end
-
   def test_rejects_invalid_concurrency
     [0, -1, 1.5, "4"].each do |value|
       assert_raises(ArgumentError) { document(concurrency: value) }

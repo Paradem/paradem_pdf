@@ -13,6 +13,80 @@ class RenderThreadTest < Minitest::Test
       origin: "https://documents.example.test/", locale: "en", concurrency: 2, **options)
   end
 
+  def test_individual_headers_and_footers_overlap_across_pages_within_pool_limit
+    bytes = {"body" => pdf_bytes("one", "two", "three", "four")}
+    1.upto(4) do |page|
+      ["header", "footer"].each { |kind| bytes["#{kind}#{page}"] = pdf_bytes("#{kind}#{page}") }
+    end
+    caller = Thread.current
+    factory = Grover::Processor.method(:new)
+
+    [1, 2, 4].each do |concurrency|
+      mutex = Mutex.new
+      barrier = ConditionVariable.new
+      generation = 0
+      arrivals = 0
+      active = []
+      snapshots = []
+      conversions = []
+      Grover::Processor.stub(:new, ->(root) {
+        processor = factory.call(root)
+        processor.define_singleton_method(:convert) do |_kind, html, _options|
+          if html == "body"
+            conversions << [html, Thread.current]
+            next bytes.fetch(html)
+          end
+          mutex.synchronize do
+            conversions << [html, Thread.current]
+            active << html
+            snapshots << active.dup
+            current_generation = generation
+            arrivals += 1
+            begin
+              if arrivals == concurrency
+                arrivals = 0
+                generation += 1
+                barrier.broadcast
+              else
+                deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2
+                while generation == current_generation
+                  remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+                  raise Timeout::Error, "overlay conversions did not overlap" unless remaining.positive?
+                  barrier.wait(mutex, remaining)
+                end
+              end
+            ensure
+              active.delete(html)
+            end
+          end
+          bytes.fetch(html)
+        end
+        processor
+      }) do
+        ParademPdf::Browser.stub(:open, ->(**) { FakeBrowser.new }) do
+          doc = document(concurrency: concurrency,
+            header: ->(page:, **) { "header#{page}" }, footer: ->(page:, **) { "footer#{page}" })
+          pages = CombinePDF.parse(doc.to_pdf).pages
+          assert_equal 4, pages.length
+          pages.each_with_index do |page, index|
+            assert_includes page_text(page), "header#{index + 1}"
+            assert_includes page_text(page), "footer#{index + 1}"
+          end
+        end
+      end
+      assert_equal concurrency, snapshots.map(&:length).max
+      assert_equal bytes.keys.sort, conversions.map(&:first).sort
+      assert_same caller, conversions.first.last
+      assert conversions.drop(1).all? { |_, thread| !thread.equal?(caller) && !thread.alive? }
+      assert_equal concurrency, conversions.drop(1).map(&:last).uniq.length
+      if concurrency == 4
+        assert snapshots.any? { |jobs| jobs.count { |html| html.start_with?("header") } > 1 }
+        assert snapshots.any? { |jobs| jobs.count { |html| html.start_with?("footer") } > 1 }
+        assert snapshots.any? { |jobs| jobs.any? { |html| html.start_with?("header") } && jobs.any? { |html| html.start_with?("footer") } }
+      end
+    end
+  end
+
   def test_callbacks_cache_and_body_stay_on_caller_while_overlays_use_workers
     caller = Thread.current
     store = TestCacheStore.new
