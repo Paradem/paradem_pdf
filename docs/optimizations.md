@@ -16,6 +16,8 @@ cannot invalidate a completed hit.
 
 The application must compute its cache key and render from the same snapshot.
 Use `cache: nil` when callback dependencies cannot be declared reliably.
+For example, a fixture whose body varies by requested section count must include
+that count in its key. The rendered HTML no longer adds an implicit body revision.
 
 See `completed_inputs` in [document.rb](../lib/paradem_pdf/document.rb) and
 `test_completed_hit_skips_all_conversion_and_callbacks` in
