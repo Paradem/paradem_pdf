@@ -64,11 +64,15 @@ module ParademPdf
       end
     end
 
-    def write(key:, bytes:, expires_in:, expected_pages: nil, require_cache_write: false)
+    def write(key:, bytes:, expires_in:, metadata: nil, expected_pages: nil, require_cache_write: false)
       self.class.validate_expiry(expires_in)
       validate(bytes, expected_pages)
 
-      written = @store.write(key, bytes, expires_in: expires_in)
+      options = {expires_in: expires_in}
+      if @store.respond_to?(:paradem_pdf_metadata_support?) && @store.paradem_pdf_metadata_support?
+        options[:metadata] = metadata
+      end
+      written = @store.write(key, bytes, **options)
       raise CacheWriteFailed, "Cache store rejected PDF write" if require_cache_write && !written
 
       bytes
@@ -79,6 +83,21 @@ module ParademPdf
 
       read(key: key, expected_pages: expected_pages) ||
         write(key: key, bytes: yield, expires_in: expires_in, expected_pages: expected_pages, require_cache_write: require_cache_write)
+    end
+
+    def prune(version: nil, doc_type: nil, keys: nil, dry_run: false)
+      keys = [keys] if keys.is_a?(String)
+      [version, doc_type].compact.each do |value|
+        raise ArgumentError, "Prune filters must be nonblank Strings" unless value.is_a?(String) && !value.strip.empty?
+      end
+      if keys && (!keys.is_a?(Array) || keys.empty? || keys.any? { |key| !key.is_a?(String) || key.strip.empty? })
+        raise ArgumentError, "keys must contain nonblank Strings"
+      end
+      raise ArgumentError, "Provide version, doc_type, or keys" unless version || doc_type || keys
+      raise ArgumentError, "Cache store does not support pruning" unless @store.respond_to?(:paradem_pdf_prune)
+      raise ArgumentError, "dry_run must be a boolean" unless dry_run == true || dry_run == false
+
+      @store.paradem_pdf_prune(version: version, doc_type: doc_type, keys: keys, dry_run: dry_run)
     end
 
     private

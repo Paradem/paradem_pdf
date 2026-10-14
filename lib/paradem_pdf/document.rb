@@ -113,7 +113,8 @@ module ParademPdf
       end
 
       bytes = assemble(body_renderer, provider, require_cache_write)
-      @cache.write(key: key, bytes: bytes, expires_in: @expires_in, require_cache_write: require_cache_write)
+      @cache.write(key: key, bytes: bytes, expires_in: @expires_in, metadata: metadata,
+        require_cache_write: require_cache_write)
       bytes
     ensure
       owned&.close
@@ -201,6 +202,10 @@ module ParademPdf
        "doc_type" => @doc_type, "locale" => @locale, "kind" => kind, "deploy_version" => @deploy_version}
     end
 
+    def metadata
+      {"doc_type" => @doc_type, "deploy_version" => @deploy_version}
+    end
+
     def completed_inputs
       cache_inputs("completed").merge(
         "body_config" => renderer("", @body_margins).fingerprint_inputs, "cache_key" => @cache_key,
@@ -251,7 +256,7 @@ module ParademPdf
       pending.each do |item|
         bytes = item[:bytes]
         results[item[:position]] = validate_overlay(bytes, item[:job][:page])
-        @cache&.write(key: item[:key], bytes: bytes, expires_in: @expires_in,
+        @cache&.write(key: item[:key], bytes: bytes, expires_in: @expires_in, metadata: metadata,
           expected_pages: 1, require_cache_write: require_cache_write)
       end
 

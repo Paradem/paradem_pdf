@@ -124,6 +124,23 @@ The adapter requires an initialized Rails environment to use its default cache.
 Source and checks: [rails.rb](../lib/paradem_pdf/rails.rb),
 [rails_test.rb](../test/rails_test.rb).
 
+## Selective pruning
+
+`ParademPdf.prune(version: nil, doc_type: nil, keys: nil, dry_run: false)` uses
+the configured store. `Cache#prune` provides the same operation for an explicit
+store. A version alone selects all entries for that deployment. Supplied filters
+combine with AND; multiple keys match within the list. Blank or malformed supplied
+filters raise instead of broadening the selection. No selectors also raises.
+
+The store implements `paradem_pdf_prune` with those keywords and returns
+`{count: Integer, versions: Array}`. A dry run does not delete. Versions can contain
+nil for unversioned entries. Stores can opt into write metadata with
+`paradem_pdf_metadata_support?`; writes then receive `metadata:` containing
+`"doc_type"` and `"deploy_version"`. Plain stores receive no additional keywords.
+
+Applications own prune confirmation and deployment warnings. No Active Record or
+Kamal dependency is required by the gem.
+
 ## Errors
 
 | Exception | Meaning |

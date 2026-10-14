@@ -5,16 +5,16 @@ latency, memory usage, CPU cost, or speedup in an application.
 
 ## Completed-document caching
 
-A valid completed hit returns stored bytes without conversion, per-page
+A valid completed hit returns stored bytes without body rendering, conversion, per-page
 callbacks, or a managed browser launch. The gem still captures effective
 rendering inputs to find the key.
 
-The key includes body rendering inputs, decoration presence and configuration,
-namespace, document type, locale, render version, asset version, and explicit
-callback freshness. Changing callback output without changing declared freshness
+The key includes effective render configuration, decoration presence and configuration,
+namespace, document type, locale, render version, deploy version, and explicit
+caller dependencies. Changing callback output without changing declared dependencies
 cannot invalidate a completed hit.
 
-The application must compute freshness and render from the same snapshot.
+The application must compute its cache key and render from the same snapshot.
 Use `cache: nil` when callback dependencies cannot be declared reliably.
 
 See `completed_inputs` in [document.rb](../lib/paradem_pdf/document.rb) and
@@ -25,7 +25,7 @@ See `completed_inputs` in [document.rb](../lib/paradem_pdf/document.rb) and
 
 Headers and footers have separate entries. Their keys include page, actual total
 pages, decoration HTML, effective rendering inputs, and shared cache identifiers.
-They do not include the complete body fingerprint or callback freshness.
+They do not include the completed document's caller-owned cache key.
 Identical decorations can therefore reuse bytes across documents.
 
 When only decorations hit, the body still converts to establish the page count,

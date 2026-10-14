@@ -81,14 +81,15 @@ See `parse_pdf`, `page_geometry`, and `validate_overlay` in
 
 ## Cache ownership
 
-Only the supplied store's `read` and `write` methods are used. Invalid cached
+Normal caching uses the supplied store's `read` and `write` methods. Optional
+metadata and pruning capabilities support persistent stores. Invalid cached
 PDFs are misses. Store exceptions propagate. False or nil writes are best-effort
 by default and raise in strict mode.
 
-The application declares every callback dependency through `freshness`, using
-the same data snapshot that the callbacks capture. Completed hits skip callbacks,
+The application declares every body and callback dependency through `cache_key`, using
+the same data snapshot that the callbacks capture. Completed hits skip all callbacks,
 so the gem cannot discover undeclared changes. Authorization must occur before
-using cached bytes. Asset dependencies belong in `assets_version`.
+using cached bytes. Immutable code and asset revisions belong in `deploy_version`.
 
 There is no cache lock or single-flight coordination. Concurrent cold misses
 may duplicate conversion. See [optimizations.md](optimizations.md) for reuse and
