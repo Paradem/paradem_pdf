@@ -55,8 +55,8 @@ module ReadinessFixture
       body_margins: {top: "25mm", bottom: "25mm", left: "15mm", right: "15mm"},
       header_margins: {top: "10mm", bottom: "0mm", left: "15mm", right: "15mm"},
       footer_margins: {top: "0mm", bottom: "10mm", left: "15mm", right: "15mm"},
-      concurrency: concurrency, cache: store, cache_namespace: "readiness-fixture", freshness: "fixture-v1",
-      assets_version: Digest::SHA256.file(ENV.fetch("PARADEM_PDF_TEST_FONT")).hexdigest, expires_in: 600)
+      concurrency: concurrency, cache: store, cache_namespace: "readiness-fixture", cache_key: "fixture-v1",
+      deploy_version: Digest::SHA256.file(ENV.fetch("PARADEM_PDF_TEST_FONT")).hexdigest, expires_in: 600)
   end
 
   def self.records(directory)
@@ -172,8 +172,8 @@ module ReadinessFixture
           writes = store.writes.length
           doc = ParademPdf::Document.new(doc_type: "media-regression-#{iteration}-#{scenario}",
             body_html: html(scenario, lazy_offscreen: false), origin: "https://documents.example.test/", locale: "en",
-            options: options, concurrency: 1, cache: store, cache_namespace: "media-regression", freshness: "fixture-v1",
-            assets_version: "platform-font", expires_in: 600)
+            options: options, concurrency: 1, cache: store, cache_namespace: "media-regression", cache_key: "fixture-v1",
+            deploy_version: "platform-font", expires_in: 600)
           error = nil
           begin
             doc.to_pdf(browser: browser)
@@ -214,8 +214,8 @@ module ReadinessFixture
             body_html: html("healthy", lazy_offscreen: false), origin: "https://documents.example.test/", locale: "en",
             header: ->(page:, total_pages:) { html("healthy", total: 1, lazy_offscreen: false) },
             footer: ->(page:, total_pages:) { html(scenario, total: 1, lazy_offscreen: false) },
-            options: options, concurrency: 4, cache: store, cache_namespace: "parallel-media", freshness: "fixture-v1",
-            assets_version: "platform-font", expires_in: 600)
+            options: options, concurrency: 4, cache: store, cache_namespace: "parallel-media", cache_key: "fixture-v1",
+            deploy_version: "platform-font", expires_in: 600)
           error = nil
           begin
             bytes = doc.to_pdf(browser: browser)

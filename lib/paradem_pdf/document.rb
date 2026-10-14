@@ -3,11 +3,13 @@ require "etc"
 
 module ParademPdf
   class Document
-    RENDER_VERSION = "1".freeze
+    RENDER_VERSION = "2".freeze
+    UNSPECIFIED = Object.new.freeze
+    private_constant :UNSPECIFIED
 
-    def initialize(doc_type:, body_html:, origin:, locale:, header: nil, footer: nil,
+    def initialize(doc_type:, body_html:, locale:, origin: nil, header: nil, footer: nil,
       options: {}, body_margins: {}, header_margins: {}, footer_margins: {},
-      cache: nil, cache_namespace: nil, freshness: nil, assets_version: nil, expires_in: nil,
+      cache: UNSPECIFIED, cache_namespace: nil, cache_key: nil, deploy_version: nil, expires_in: UNSPECIFIED,
       concurrency: nil, readiness: true, readiness_timeout: 20_000)
       GroverRenderer.validate_readiness(readiness, readiness_timeout)
       @readiness = readiness
@@ -21,12 +23,14 @@ module ParademPdf
       @body_margins = body_margins
       @header_margins = header_margins
       @footer_margins = footer_margins
-      @cache = cache.nil? ? nil : Cache.new(store: cache)
+      config = ParademPdf.configuration
+      store = cache.equal?(UNSPECIFIED) ? config.cache : cache
+      @cache = store.nil? ? nil : Cache.new(store: store)
 
-      @cache_namespace = cache_namespace
-      @freshness = freshness
-      @assets_version = assets_version
-      @expires_in = expires_in
+      @cache_namespace = cache_namespace || config.cache_namespace
+      @cache_key = cache_key
+      @deploy_version = deploy_version || config.deploy_version
+      @expires_in = expires_in.equal?(UNSPECIFIED) ? config.expires_in : expires_in
       @concurrency = if concurrency.nil?
         [(Etc.nprocessors || 1) - 1, 1].max
       else
@@ -37,8 +41,12 @@ module ParademPdf
         raise ArgumentError, "concurrency must be a positive Integer"
       end
 
-      {doc_type: doc_type, body_html: body_html, origin: origin, locale: locale}.each do |name, value|
+      {doc_type: doc_type, locale: locale}.each do |name, value|
         raise ArgumentError, "#{name} must be a String" unless value.is_a?(String)
+      end
+
+      unless body_html.is_a?(String) || body_html.respond_to?(:call)
+        raise ArgumentError, "body_html must be a String or callable"
       end
 
       [header, footer].each do |callback|
@@ -49,7 +57,10 @@ module ParademPdf
         raise ArgumentError, "Options and margins must be Hashes" unless value.is_a?(Hash)
       end
 
-      @options = options.dup
+      @options = config.options.deep_dup.merge(options.deep_dup)
+      @body_margins = body_margins.deep_dup
+      @header_margins = header_margins.deep_dup
+      @footer_margins = footer_margins.deep_dup
       @explicit_endpoint = nil
       ["browser_ws_endpoint", "browserWsEndpoint"].each do |key|
         @explicit_endpoint = @options.delete(key) if @options.key?(key)
@@ -60,26 +71,34 @@ module ParademPdf
         raise ArgumentError, "browser_ws_endpoint must be a ws:// or wss:// URL"
       end
 
-      @origin = GroverRenderer.normalize_origin(origin)
+      @origin = GroverRenderer.normalize_origin(origin || config.origin)
 
       if @cache
-        unless cache_namespace.is_a?(String) && !cache_namespace.strip.empty?
+        unless @cache_namespace.is_a?(String) && !@cache_namespace.strip.empty?
           raise ArgumentError, "Caching requires a nonblank cache_namespace"
         end
 
-        if freshness.nil? || assets_version.nil?
-          raise ArgumentError, "Caching requires explicit freshness and assets_version"
+        if cache_key.nil?
+          raise ArgumentError, "Caching requires an explicit cache_key"
         end
 
-        @freshness = Cache.canonicalize(freshness)
-        @assets_version = Cache.canonicalize(assets_version)
-        Cache.validate_expiry(expires_in)
+        @cache_key = Cache.canonicalize(cache_key)
+        @deploy_version = Cache.canonicalize(@deploy_version)
+        @cache_namespace = @cache_namespace.dup
+        Cache.validate_expiry(@expires_in)
       end
     end
 
     def to_pdf(browser: nil, require_cache_write: false)
-      body_renderer = renderer(@body_html, @body_margins)
       owned = nil
+      if @cache
+        key = @cache.key(inputs: completed_inputs)
+        cached = @cache.read(key: key)
+        return cached if cached
+      end
+
+      html = @body_html.respond_to?(:call) ? @body_html.call : @body_html
+      body_renderer = renderer(html, @body_margins)
       provider = -> {
         return browser.endpoint if browser
         return @explicit_endpoint if @explicit_endpoint
@@ -92,10 +111,6 @@ module ParademPdf
       unless @cache
         return assemble(body_renderer, provider, require_cache_write)
       end
-
-      key = @cache.key(inputs: completed_inputs(body_renderer))
-      cached = @cache.read(key: key)
-      return cached if cached
 
       bytes = assemble(body_renderer, provider, require_cache_write)
       @cache.write(key: key, bytes: bytes, expires_in: @expires_in, require_cache_write: require_cache_write)
@@ -183,12 +198,12 @@ module ParademPdf
 
     def cache_inputs(kind)
       {"render_version" => RENDER_VERSION, "namespace" => @cache_namespace,
-       "doc_type" => @doc_type, "locale" => @locale, "kind" => kind, "assets_version" => @assets_version}
+       "doc_type" => @doc_type, "locale" => @locale, "kind" => kind, "deploy_version" => @deploy_version}
     end
 
-    def completed_inputs(body_renderer)
+    def completed_inputs
       cache_inputs("completed").merge(
-        "body" => body_renderer.fingerprint_inputs, "freshness" => @freshness,
+        "body_config" => renderer("", @body_margins).fingerprint_inputs, "cache_key" => @cache_key,
         "header_present" => !@header.nil?, "footer_present" => !@footer.nil?,
         "header_config" => renderer("", @header_margins).fingerprint_inputs,
         "footer_config" => renderer("", @footer_margins).fingerprint_inputs

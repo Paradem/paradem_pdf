@@ -14,13 +14,13 @@ class TestCacheStore
     raise read_error if read_error
     @reads << key
     bytes, deadline = entries[key]
-    bytes if deadline && deadline > now
+    bytes if deadline.nil? || deadline > now
   end
 
   def write(key, bytes, expires_in:)
     raise write_error if write_error
     writes << [key, bytes, expires_in]
-    entries[key] = [bytes, now + expires_in] if write_result
+    entries[key] = [bytes, expires_in && now + expires_in] if write_result
     write_result
   end
 end

@@ -175,8 +175,8 @@ module BrowserFixture
       body_margins: {top: "25mm", bottom: "25mm", left: "15mm", right: "15mm"},
       header_margins: {top: "10mm", bottom: "0mm", left: "15mm", right: "15mm"},
       footer_margins: {top: "0mm", bottom: "10mm", left: "15mm", right: "15mm"},
-      cache: store, cache_namespace: "browser-fixture", freshness: "fixture-v1",
-      assets_version: Digest::SHA256.hexdigest(font_bytes), expires_in: 60
+      cache: store, cache_namespace: "browser-fixture", cache_key: "fixture-v1",
+      deploy_version: Digest::SHA256.hexdigest(font_bytes), expires_in: 60
     )
     bytes = document.to_pdf(browser: browser)
     check_document(bytes, total, landscape, dimensions, directory, "document-#{total}")

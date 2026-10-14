@@ -7,11 +7,12 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] == "1"
     def setup
       assert File.file?(File.expand_path("../lib/paradem_pdf/rails.rb", __dir__)), "Optional Rails entry point is missing"
       require "paradem_pdf/rails"
+      ParademPdf.reset_configuration!
     end
 
     def document_options
       {doc_type: "report", body_html: "body", origin: "https://reports.example.test/", locale: "en",
-       cache_namespace: "fixture", freshness: "snapshot-1", assets_version: "assets-1", expires_in: 60}
+       cache_namespace: "fixture", cache_key: "snapshot-1", deploy_version: "assets-1", expires_in: 60}
     end
 
     def test_default_explicit_and_nil_cache_and_all_options_are_forwarded
@@ -29,7 +30,7 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] == "1"
         assert_same marker, ParademPdf::Rails.document(**options, cache: explicit)
         assert_same marker, ParademPdf::Rails.document(**options, cache: nil)
       end
-      assert_equal [options.merge(cache: ::Rails.cache), options.merge(cache: explicit), options.merge(cache: nil)], received
+      assert_equal [options, options.merge(cache: explicit), options.merge(cache: nil)], received
       assert_instance_of ActiveSupport::Cache::FileStore, ::Rails.cache
     end
 
@@ -45,6 +46,27 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] == "1"
         assert_nil first.read("expired")
         assert_equal bytes, first.read("completed")
       end
+    end
+
+    def test_documents_default_to_rails_cache_and_explicit_nil_disables_it
+      calls = []
+      convert_using(->(_kind, html, *) {
+        calls << html
+        pdf_bytes(html)
+      }) do
+        ::Rails.cache.clear
+        first = ParademPdf::Document.new(**document_options).to_pdf
+        assert_equal first, ParademPdf::Document.new(**document_options).to_pdf
+        assert_equal ["body"], calls
+        ParademPdf.configure { |config| config.cache = nil }
+        2.times { ParademPdf::Document.new(**document_options).to_pdf }
+        assert_equal 3, calls.length
+        ParademPdf.configure { |config| config.cache = ::Rails.cache }
+        ParademPdf::Document.new(**document_options, cache: nil).to_pdf
+        assert_equal 4, calls.length
+      end
+    ensure
+      ParademPdf.reset_configuration!
     end
 
     def test_app_rendered_letter_pixels_nil_decorations_and_options_do_not_bleed

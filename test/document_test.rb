@@ -26,8 +26,8 @@ class DocumentTest < Minitest::Test
       origin: "https://documents.example.test/", locale: "en",
       header: decoration, footer: decoration, options: {format: "Letter"},
       body_margins: {bottom: "23mm"}, header_margins: {}, footer_margins: {bottom: "15mm"},
-      cache: TestCacheStore.new, cache_namespace: "example", freshness: {"revision" => 1},
-      assets_version: "release-1", expires_in: 60
+      cache: TestCacheStore.new, cache_namespace: "example", cache_key: {"revision" => 1},
+      deploy_version: "release-1", expires_in: 60
     )
 
     assert_respond_to document, :to_pdf
@@ -39,8 +39,8 @@ class DocumentTest < Minitest::Test
   end
 
   def cached_document(store, **options)
-    document(cache: store, cache_namespace: "example", freshness: "snapshot-1",
-      assets_version: "assets-1", expires_in: 60, **options)
+    document(cache: store, cache_namespace: "example", cache_key: "snapshot-1",
+      deploy_version: "assets-1", expires_in: 60, **options)
   end
 
   def test_completed_hit_skips_all_conversion_and_callbacks
@@ -121,7 +121,7 @@ class DocumentTest < Minitest::Test
       html.start_with?("body") ? pdf_bytes(html, "second") : pdf_bytes(html)
     }) do
       first = cached_document(store, body_html: "body A", footer: footer).to_pdf
-      second = cached_document(store, body_html: "body B", freshness: "new snapshot", footer: footer).to_pdf
+      second = cached_document(store, body_html: "body B", cache_key: "new snapshot", footer: footer).to_pdf
       [first, second].each do |bytes|
         ParademPdf::Document.parse_pdf(bytes).pages.each_with_index do |page, index|
           assert_includes page_text(page), "public #{index + 1}/2"
@@ -145,7 +145,7 @@ class DocumentTest < Minitest::Test
       end
     }) do
       [2, 3].each do |total|
-        bytes = cached_document(store, body_html: (total == 2) ? "two" : "three", footer: footer).to_pdf
+        bytes = cached_document(store, body_html: (total == 2) ? "two" : "three", cache_key: total, footer: footer).to_pdf
         ParademPdf::Document.parse_pdf(bytes).pages.each_with_index do |page, index|
           assert_includes page_text(page), "footer #{index + 1}/#{total}"
         end
@@ -165,7 +165,7 @@ class DocumentTest < Minitest::Test
     }) do
       cached_document(store, footer: footer).to_pdf
       second_page = "new"
-      bytes = cached_document(store, footer: footer, freshness: {"page2" => "new"}).to_pdf
+      bytes = cached_document(store, footer: footer, cache_key: {"page2" => "new"}).to_pdf
       assert_includes page_text(ParademPdf::Document.parse_pdf(bytes).pages.last), "footer 2/2 new"
     end
     assert_equal ["body", "body"], conversions.select { |html| html == "body" }
@@ -181,7 +181,7 @@ class DocumentTest < Minitest::Test
     }) do
       [["Alice", "en"], ["Bob", "en"], ["Bob", "ar"], ["Bob", "fa"], ["Bob", "en"]].each do |name, locale|
         footer = ->(**) { "#{name} 2026 variant A" }
-        cached_document(store, locale: locale, freshness: [name, locale], footer: footer, header: ->(**) { "public" }).to_pdf
+        cached_document(store, locale: locale, cache_key: [name, locale], footer: footer, header: ->(**) { "public" }).to_pdf
       end
     end
     assert_equal 4, conversions.count("body")
@@ -191,8 +191,8 @@ class DocumentTest < Minitest::Test
   end
 
   def test_completed_key_changes_for_every_declared_dimension
-    changes = {doc_type: "report", body_html: "new body", origin: "https://other.example.test/", locale: "ar",
-               cache_namespace: "other", freshness: {"revision" => 2}, assets_version: "assets-2",
+    changes = {doc_type: "report", origin: "https://other.example.test/", locale: "ar",
+               cache_namespace: "other", cache_key: {"revision" => 2}, deploy_version: "assets-2",
                options: {format: "Letter"}, body_margins: {bottom: "20mm"},
                header_margins: {top: "1mm"}, footer_margins: {bottom: "1mm"},
                header: ->(**) { "header" }, footer: ->(**) { "footer" }}
@@ -210,7 +210,7 @@ class DocumentTest < Minitest::Test
     end
   end
 
-  def test_direction_date_and_variant_changes_with_declared_freshness
+  def test_direction_date_and_variant_changes_with_declared_cache_key
     store = TestCacheStore.new
     conversions = []
     convert_using(->(_kind, html, *) {
@@ -218,7 +218,7 @@ class DocumentTest < Minitest::Test
       pdf_bytes(html)
     }) do
       ["ltr 2026 A", "rtl 2026 A", "rtl 2027 A", "rtl 2027 B"].each do |data|
-        bytes = cached_document(store, footer: ->(**) { data }, freshness: data).to_pdf
+        bytes = cached_document(store, footer: ->(**) { data }, cache_key: data).to_pdf
         assert_includes page_text(ParademPdf::Document.parse_pdf(bytes).pages.first), data
       end
     end
@@ -250,8 +250,8 @@ class DocumentTest < Minitest::Test
 
   def test_requires_explicit_valid_cache_dependencies_before_access
     store = TestCacheStore.new
-    {cache_namespace: [nil, "", " "], freshness: [nil, Object.new, {symbol: 1}],
-     assets_version: [nil, Object.new], expires_in: [nil, 0, -1, Float::INFINITY]}.each do |field, values|
+    {cache_namespace: [nil, "", " "], cache_key: [nil, Object.new, {symbol: 1}],
+     deploy_version: [Object.new], expires_in: [0, -1, Float::INFINITY]}.each do |field, values|
       values.each { |value| assert_raises(ArgumentError) { cached_document(store, **{field => value}) } }
     end
     assert_raises(ArgumentError) { cached_document(Object.new) }
@@ -296,13 +296,13 @@ class DocumentTest < Minitest::Test
       old_entries = store.entries.dup
       failure = RuntimeError.new("callback failed")
       assert_same failure, assert_raises(RuntimeError) {
-        cached_document(store, freshness: "new", footer: ->(**) { raise failure }).to_pdf(require_cache_write: true)
+        cached_document(store, cache_key: "new", footer: ->(**) { raise failure }).to_pdf(require_cache_write: true)
       }
       assert_equal old_entries, store.entries
       assert store.entries.key?(completed)
     end
     convert_using(->(_kind, html, *) { (html == "body") ? pdf_bytes("body") : pdf_bytes("one", "two") }) do
-      assert_raises(ParademPdf::InvalidPdf) { cached_document(store, freshness: "invalid", footer: ->(**) { "invalid" }).to_pdf }
+      assert_raises(ParademPdf::InvalidPdf) { cached_document(store, cache_key: "invalid", footer: ->(**) { "invalid" }).to_pdf }
       assert_equal 2, store.entries.length
     end
   end
@@ -328,7 +328,7 @@ class DocumentTest < Minitest::Test
   end
 
   def test_complete_invalidation_reuses_only_unchanged_partial_rendering_inputs
-    changes = {assets_version: "new assets", options: {print_background: false},
+    changes = {deploy_version: "new assets", options: {print_background: false},
                footer_margins: {bottom: "17mm"}, origin: "https://other.example.test/",
                locale: "ar", doc_type: "other", cache_namespace: "other"}
     changes.each do |field, value|
@@ -345,7 +345,7 @@ class DocumentTest < Minitest::Test
     end
   end
 
-  def test_native_configuration_and_html_metadata_enter_completed_fingerprint
+  def test_native_configuration_and_declared_html_metadata_enter_completed_fingerprint
     store = TestCacheStore.new
     conversions = []
     original = Grover.configuration.options
@@ -353,10 +353,10 @@ class DocumentTest < Minitest::Test
       conversions << html
       pdf_bytes("body")
     }) do
-      cached_document(store, body_html: '<meta name="grover-format" content="Letter">').to_pdf
-      cached_document(store, body_html: '<meta name="grover-format" content="A4">').to_pdf
+      cached_document(store, body_html: '<meta name="grover-format" content="Letter">', cache_key: "Letter").to_pdf
+      cached_document(store, body_html: '<meta name="grover-format" content="A4">', cache_key: "A4").to_pdf
       Grover.configuration.options = original.merge(timeout: 12345)
-      cached_document(store, body_html: '<meta name="grover-format" content="A4">').to_pdf
+      cached_document(store, body_html: '<meta name="grover-format" content="A4">', cache_key: "A4").to_pdf
     end
     assert_equal 3, conversions.length
   ensure
@@ -391,9 +391,9 @@ class DocumentTest < Minitest::Test
       pdf_bytes(html)
     }) do
       first = cached_document(store, options: {timeout: "123", print_background: true},
-        freshness: {"b" => [{"d" => 4, "c" => 3}], "a" => 1}).to_pdf
+        cache_key: {"b" => [{"d" => 4, "c" => 3}], "a" => 1}).to_pdf
       assert_equal first, cached_document(store, options: {"print_background" => true, "timeout" => 123},
-        freshness: {"a" => 1, "b" => [{"c" => 3, "d" => 4}]}).to_pdf
+        cache_key: {"a" => 1, "b" => [{"c" => 3, "d" => 4}]}).to_pdf
     end
   end
 
@@ -463,7 +463,7 @@ class DocumentTest < Minitest::Test
       end
     }) do
       [2, 3].each do |total|
-        cached_document(store, body_html: "body #{total}", header: ->(**) { "same" }, footer: ->(**) { "same" }).to_pdf
+        cached_document(store, body_html: "body #{total}", cache_key: total, header: ->(**) { "same" }, footer: ->(**) { "same" }).to_pdf
       end
     end
     assert_equal 10, conversions.count("same")

@@ -13,28 +13,29 @@ The keyword signature and validation are in
 | Required keyword | Contract |
 | --- | --- |
 | `doc_type` | String identifying the application document type and cache grouping |
-| `body_html` | String containing application-rendered HTML |
-| `origin` | Explicit HTTP(S) URL with host, no credentials, query, or fragment; used for asset preprocessing and display URL |
+| `body_html` | String containing application-rendered HTML, or zero-argument callable resolved only after a completed miss |
 | `locale` | String identifying the locale; does not change translation state |
 
 | Optional keyword | Default | Contract |
 | --- | --- | --- |
+| `origin` | Configuration | Explicit HTTP(S) URL with host, no credentials, query, or fragment; required directly or in configuration |
 | `header`, `footer` | `nil` | Callable receiving `page:` and `total_pages:`, returning complete HTML as a String |
-| `options` | `{}` | Grover option Hash, subject to this gem's origin and request-failure controls |
+| `options` | Configuration | Grover option Hash, merged over a copy of configured options |
 | `body_margins`, `header_margins`, `footer_margins` | `{}` | Per-part margin Hashes; corresponding values override caller and global margins |
-| `cache` | `nil` | Store with `read(key)` and `write(key, bytes, expires_in:)`; nil disables caching |
-| `cache_namespace` | `nil` | Required nonblank String when caching |
-| `freshness` | `nil` | Required non-nil callback dependency value when caching |
-| `assets_version` | `nil` | Required non-nil asset dependency value when caching |
-| `expires_in` | `nil` | Required finite positive Numeric seconds when caching |
+| `cache` | Configuration, then Rails default | Store with `read(key)` and `write(key, bytes, expires_in:)`; explicit nil disables caching |
+| `cache_namespace` | Configuration | Required nonblank String when caching |
+| `cache_key` | `nil` | Required non-nil caller-owned dependency value when caching |
+| `deploy_version` | Configuration | Immutable code and asset revision |
+| `expires_in` | Configuration | Nil for no expiry, or finite positive Numeric seconds |
 | `concurrency` | Processor count minus one, minimum one | Positive Integer bounding overlay conversion workers; nil selects the default |
 | `readiness` | `true` | Boolean enabling the default image/font readiness policy |
 | `readiness_timeout` | `20_000` | Integer milliseconds, 1 through 2,147,483,647, validated even when readiness is disabled |
 
-Freshness and asset values accept JSON-compatible data: Strings, Integers,
+Cache key and deployment values accept JSON-compatible data: Strings, Integers,
 finite Floats, booleans, nil within containers, Arrays, and Hashes with String
-keys. Cycles and unsupported objects raise. Top-level nil is not accepted for
-these required caching values. See [cache.rb](../lib/paradem_pdf/cache.rb).
+keys. Cycles and unsupported objects raise. A cache key cannot be top-level nil.
+See [cache.rb](../lib/paradem_pdf/cache.rb). Applications must declare HTML metadata
+and dynamic translation changes in the key, since a hit never renders HTML.
 
 Page numbers start at one. Each decoration must render one page matching its
 body page's geometry, rotation, and user unit. Callbacks run on the calling
@@ -114,9 +115,10 @@ Source and checks: [rails_renderer.rb](../lib/paradem_pdf/rails_renderer.rb),
 
 ### `ParademPdf::Rails.document(**options)`
 
-Returns a `Document` with the same keyword contracts as `Document.new`. It uses
-`Rails.cache` only when `cache` is omitted. Explicit `cache: nil` disables
-caching. When caching, supply namespace, freshness, asset version, and expiry.
+Returns a `Document` with the same keyword contracts as `Document.new`. Both use
+`Rails.cache` when no store is configured and `cache` is omitted. Explicit
+configured or per-document `cache: nil` disables caching. When caching, supply a
+namespace and cache key, directly or through the supported configuration defaults.
 The adapter requires an initialized Rails environment to use its default cache.
 
 Source and checks: [rails.rb](../lib/paradem_pdf/rails.rb),

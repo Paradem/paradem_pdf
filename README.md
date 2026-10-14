@@ -154,8 +154,6 @@ list. At least one nonblank selector is required. The store must implement
 `paradem_pdf_prune(version:, doc_type:, keys:, dry_run:)` and return `{count:,
 versions:}`. Applications own authorization and interactive confirmation.
 
-The examples below describe the previous 0.4 API and are migrated alongside the
-0.5 implementation.
 
 Supply a store supporting `read(key)` and `write(key, bytes, expires_in:)`.
 For example, with your application's `supplied_cache_store` and the HTML above:
@@ -166,15 +164,15 @@ cached_document = ParademPdf::Document.new(
   origin: "https://documents.example.test/", locale: "en",
   cache: supplied_cache_store,
   cache_namespace: "my-app/invoices",
-  freshness: {"template" => "invoice-v1", "snapshot" => "invoice-42-revision-3"},
-  assets_version: "assets-v1",
+   cache_key: {"template" => "invoice-v1", "snapshot" => "invoice-42-revision-3"},
+   deploy_version: "assets-v1",
   expires_in: 3600
 )
 bytes = cached_document.to_pdf
 ```
 
-Declare every callback data/template dependency through `freshness`, and asset
-dependencies through `assets_version`. Use JSON-compatible values with String
+Declare every body and callback dependency through `cache_key`, and immutable code
+and asset dependencies through `deploy_version`. Use JSON-compatible values with String
 Hash keys. Render and compute freshness from the same data snapshot.
 
 Completed hits skip conversion, callbacks, and browser launch. Decorations can
@@ -224,8 +222,9 @@ Use `layout: false` for a template that produces complete HTML itself. `render`
 also accepts `assigns:` for instance-variable inputs. Decorations can use the
 same adapter with page and total locals. The adapter does not change locale state.
 
-When `cache` is omitted, `Rails.document` uses `Rails.cache`; supply all required
-cache inputs. Explicit `cache: nil` disables caching. The gem installs no engine,
+When `cache` is omitted, both `Document.new` and `Rails.document` use the configured
+store, defaulting to `Rails.cache`; supply all required cache inputs. Explicit
+`cache: nil` disables caching. The gem installs no engine,
 routes, migrations, or initializer. See the [API reference](docs/api-reference.md).
 
 ## Images

@@ -45,6 +45,8 @@ module ParademPdf
     end
 
     def self.validate_expiry(expires_in)
+      return if expires_in.nil?
+
       unless expires_in.is_a?(Numeric) && expires_in.real? && expires_in.finite? && expires_in.positive?
         raise ArgumentError, "expires_in must be a finite positive number of seconds"
       end
