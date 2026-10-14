@@ -127,6 +127,36 @@ updates or force print media. See [design](docs/design.md#resource-readiness).
 
 ## Caching
 
+### Version 0.5 migration
+
+Configure shared defaults with `ParademPdf.configure`: `options`, `origin`, `cache`,
+`cache_namespace`, `deploy_version`, and `expires_in`. Document keywords override
+these defaults. Explicit `cache: nil` disables caching; explicit `expires_in: nil`
+disables expiry. Without a configured store, the optional Rails integration uses
+`Rails.cache`; standalone Ruby defaults to no cache.
+
+Replace `freshness` and `assets_version` with a JSON-compatible `cache_key` that
+declares all body and decoration dependencies. Include immutable code and asset
+revisions in `deploy_version`. Cached documents require a non-nil `cache_key`.
+`body_html` accepts a String or a zero-argument callable. A completed hit returns
+validated bytes without invoking the body or decoration callbacks. Build the key
+and render from the same captured data. Changes in HTML metadata and dynamic
+translations must be represented in the key; they cannot be discovered on a hit.
+
+`expires_in: nil` keeps entries until the store removes them. Stores implementing
+`paradem_pdf_metadata_support?` receive `metadata:` on writes, containing String
+keys `doc_type` and `deploy_version`. Ordinary stores retain the read/write API.
+
+`ParademPdf.prune(version: "release", doc_type: "invoice", dry_run: true)` previews
+matching entries in the configured store. Omit `dry_run` to delete. `keys:` accepts
+one stored cache key or an Array. Filters combine with AND; keys match within the
+list. At least one nonblank selector is required. The store must implement
+`paradem_pdf_prune(version:, doc_type:, keys:, dry_run:)` and return `{count:,
+versions:}`. Applications own authorization and interactive confirmation.
+
+The examples below describe the previous 0.4 API and are migrated alongside the
+0.5 implementation.
+
 Supply a store supporting `read(key)` and `write(key, bytes, expires_in:)`.
 For example, with your application's `supplied_cache_store` and the HTML above:
 

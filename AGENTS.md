@@ -30,9 +30,11 @@ Validate generated and cached PDF bytes. Decorations must contain one page and
 match body geometry and rotation. Parse fresh pages for each assembly. Never
 cache mutable CombinePDF objects or publish incomplete documents.
 
-Use only cache `read` and `write` operations. Keep page and total pages in
-decoration keys. Completed keys include explicit callback freshness and asset
-dependencies. Keep authorization and data snapshot ownership in the caller.
+Use cache `read` and `write` operations, with optional
+`paradem_pdf_metadata_support?` and `paradem_pdf_prune` capabilities. Keep page and
+total pages in decoration keys. Completed keys include a caller-owned `cache_key`
+and deploy version declaring body, callback, code and asset dependencies. Resolve
+body HTML only after a completed miss. Keep authorization and data snapshot ownership in the caller.
 Store exceptions propagate. Strict mode rejects false or nil writes.
 
 ## Browser lifecycle
