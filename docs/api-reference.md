@@ -25,7 +25,7 @@ The keyword signature and validation are in
 | `cache` | Configuration, then Rails default | Store with `read(key)` and `write(key, bytes, expires_in:)`; explicit nil disables caching |
 | `cache_namespace` | Configuration | Required nonblank String when caching |
 | `cache_key` | `nil` | Required non-nil caller-owned dependency value when caching |
-| `cache_version` | Configuration, initially nil | Caller-owned cache revision; the gem does not choose a value or source |
+| `cache_version` | Configuration, initially nil | Caller-owned cache revision; explicit nil or false overrides configuration, and the gem does not choose a value or source |
 | `expires_in` | Configuration | Nil for no expiry, or finite positive Numeric seconds |
 | `concurrency` | Processor count minus one, minimum one | Positive Integer bounding overlay conversion workers; nil selects the default |
 | `readiness` | `true` | Boolean enabling the default image/font readiness policy |

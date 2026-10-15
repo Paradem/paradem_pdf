@@ -9,7 +9,7 @@ module ParademPdf
 
     def initialize(doc_type:, body_html:, locale:, origin: nil, header: nil, footer: nil,
       options: {}, body_margins: {}, header_margins: {}, footer_margins: {},
-      cache: UNSPECIFIED, cache_namespace: nil, cache_key: nil, cache_version: nil, expires_in: UNSPECIFIED,
+      cache: UNSPECIFIED, cache_namespace: nil, cache_key: nil, cache_version: UNSPECIFIED, expires_in: UNSPECIFIED,
       concurrency: nil, readiness: true, readiness_timeout: 20_000)
       GroverRenderer.validate_readiness(readiness, readiness_timeout)
       @readiness = readiness
@@ -29,7 +29,7 @@ module ParademPdf
 
       @cache_namespace = cache_namespace || config.cache_namespace
       @cache_key = cache_key
-      @cache_version = cache_version || config.cache_version
+      @cache_version = cache_version.equal?(UNSPECIFIED) ? config.cache_version : cache_version
       @expires_in = expires_in.equal?(UNSPECIFIED) ? config.expires_in : expires_in
       @concurrency = if concurrency.nil?
         [(Etc.nprocessors || 1) - 1, 1].max

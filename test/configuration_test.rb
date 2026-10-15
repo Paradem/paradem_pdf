@@ -120,6 +120,22 @@ class ConfigurationTest < Minitest::Test
     assert_empty store.reads
   end
 
+  def test_false_and_nil_cache_versions_override_configured_defaults
+    configure
+    conversions = []
+    convert_using(->(_kind, html, *) {
+      conversions << html
+      pdf_bytes(html)
+    }) do
+      document.to_pdf
+      2.times do
+        document(cache_version: false).to_pdf
+        document(cache_version: nil).to_pdf
+      end
+    end
+    assert_equal 3, conversions.length
+  end
+
   def test_body_callback_must_return_html_and_failures_are_not_cached
     store = configure
     assert_raises(ArgumentError) { document(body_html: -> {}).to_pdf }
