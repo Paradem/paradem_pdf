@@ -127,7 +127,12 @@ updates or force print media. See [design](docs/design.md#resource-readiness).
 
 ## Caching
 
-### Version 0.5 migration
+### Version 0.6 migration
+
+Replace the `deploy_version` configuration, document keyword and store metadata
+key with `cache_version`. The application chooses the version; the gem does not
+assign deployment meaning to it. Stores without pruning support now return an
+empty result from `ParademPdf.prune` instead of raising.
 
 Configure shared defaults with `ParademPdf.configure`: `options`, `origin`, `cache`,
 `cache_namespace`, `cache_version`, and `expires_in`. Document keywords override
