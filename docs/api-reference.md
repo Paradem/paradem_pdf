@@ -128,12 +128,17 @@ Source and checks: [rails.rb](../lib/paradem_pdf/rails.rb),
 
 `ParademPdf.prune(version: nil, doc_type: nil, keys: nil, dry_run: false)` uses
 the configured store. `Cache#prune` provides the same operation for an explicit
-store. A version alone selects all entries for that deployment. Supplied filters
+store. Pruning is optional: no configured store, or a store without
+`paradem_pdf_prune`, returns `{count: 0, versions: []}` without validating selectors
+or reading, writing, or deleting entries. Supported stores retain selector validation
+and propagate store errors.
+
+A version alone selects all entries for that deployment. Supplied filters
 combine with AND; multiple keys match within the list. Blank or malformed supplied
 filters raise instead of broadening the selection. Only nil omits a filter;
 false is invalid. No selectors also raises.
 
-The store implements `paradem_pdf_prune` with those keywords and returns
+To support pruning, the store implements `paradem_pdf_prune` with those keywords and returns
 `{count: Integer, versions: Array}`. A dry run does not delete. Versions can contain
 nil for unversioned entries. Stores can opt into write metadata with
 `paradem_pdf_metadata_support?`; writes then receive `metadata:` containing

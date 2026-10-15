@@ -67,8 +67,29 @@ class PruneTest < Minitest::Test
     assert_nil store.selectors
   end
 
-  def test_pruning_requires_a_capable_store
-    assert_raises(ArgumentError) { ParademPdf::Cache.new(store: TestCacheStore.new).prune(version: "v1") }
-    assert_raises(ArgumentError) { ParademPdf.prune(version: "v1") }
+  def test_pruning_without_a_store_is_a_no_op
+    assert_equal({count: 0, versions: []}, ParademPdf.prune)
+    ParademPdf.configure { |config| config.cache = nil }
+    assert_equal({count: 0, versions: []}, ParademPdf.prune(version: "v1"))
+  end
+
+  def test_pruning_an_unsupported_store_is_a_no_op_without_reading_or_writing
+    store = TestCacheStore.new
+    ParademPdf.configure { |config| config.cache = store }
+    assert_equal({count: 0, versions: []}, ParademPdf.prune(version: "v1"))
+    assert_equal({count: 0, versions: []}, ParademPdf::Cache.new(store: store).prune)
+    assert_equal({count: 0, versions: []}, ParademPdf.prune(keys: false))
+    assert_empty store.reads
+    assert_empty store.writes
+  end
+
+  def test_capable_store_errors_propagate
+    store = Store.new
+    def store.paradem_pdf_prune(**)
+      raise IOError, "pruning failed"
+    end
+    ParademPdf.configure { |config| config.cache = store }
+    error = assert_raises(IOError) { ParademPdf.prune(version: "v1") }
+    assert_equal "pruning failed", error.message
   end
 end

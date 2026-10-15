@@ -150,7 +150,9 @@ keys `doc_type` and `deploy_version`. Ordinary stores retain the read/write API.
 `ParademPdf.prune(version: "release", doc_type: "invoice", dry_run: true)` previews
 matching entries in the configured store. Omit `dry_run` to delete. `keys:` accepts
 one stored cache key or an Array. Filters combine with AND; keys match within the
-list. At least one nonblank selector is required. The store must implement
+list. Pruning is optional. With no store or no `paradem_pdf_prune` method, the
+call does nothing and returns `{count: 0, versions: []}`. Supported stores require
+at least one nonblank selector and implement
 `paradem_pdf_prune(version:, doc_type:, keys:, dry_run:)` and return `{count:,
 versions:}`. Applications own authorization and interactive confirmation.
 

@@ -9,7 +9,7 @@ require_relative "paradem_pdf/document"
 module ParademPdf
   def self.prune(**selectors)
     store = configuration.cache
-    raise ArgumentError, "No cache is configured" unless store
+    return {count: 0, versions: []} unless store.respond_to?(:paradem_pdf_prune)
 
     Cache.new(store: store).prune(**selectors)
   end

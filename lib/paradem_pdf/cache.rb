@@ -86,6 +86,8 @@ module ParademPdf
     end
 
     def prune(version: nil, doc_type: nil, keys: nil, dry_run: false)
+      return {count: 0, versions: []} unless @store.respond_to?(:paradem_pdf_prune)
+
       keys = [keys] if keys.is_a?(String)
       [version, doc_type].compact.each do |value|
         raise ArgumentError, "Prune filters must be nonblank Strings" unless value.is_a?(String) && !value.strip.empty?
@@ -94,7 +96,6 @@ module ParademPdf
         raise ArgumentError, "keys must contain nonblank Strings"
       end
       raise ArgumentError, "Provide version, doc_type, or keys" unless version || doc_type || keys
-      raise ArgumentError, "Cache store does not support pruning" unless @store.respond_to?(:paradem_pdf_prune)
       raise ArgumentError, "dry_run must be a boolean" unless dry_run == true || dry_run == false
 
       @store.paradem_pdf_prune(version: version, doc_type: doc_type, keys: keys, dry_run: dry_run)
