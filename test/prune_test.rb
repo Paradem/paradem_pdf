@@ -60,7 +60,8 @@ class PruneTest < Minitest::Test
     store = Store.new
     cache = ParademPdf::Cache.new(store: store)
     [{}, {keys: []}, {version: " "}, {version: "v1", doc_type: ""},
-      {version: "v1", keys: [nil]}, {version: 1}, {keys: ["a", " "]}].each do |selectors|
+      {version: "v1", keys: [nil]}, {version: "v1", keys: false},
+      {version: 1}, {keys: ["a", " "]}].each do |selectors|
       assert_raises(ArgumentError) { cache.prune(**selectors) }
     end
     assert_nil store.selectors

@@ -90,7 +90,7 @@ module ParademPdf
       [version, doc_type].compact.each do |value|
         raise ArgumentError, "Prune filters must be nonblank Strings" unless value.is_a?(String) && !value.strip.empty?
       end
-      if keys && (!keys.is_a?(Array) || keys.empty? || keys.any? { |key| !key.is_a?(String) || key.strip.empty? })
+      if !keys.nil? && (!keys.is_a?(Array) || keys.empty? || keys.any? { |key| !key.is_a?(String) || key.strip.empty? })
         raise ArgumentError, "keys must contain nonblank Strings"
       end
       raise ArgumentError, "Provide version, doc_type, or keys" unless version || doc_type || keys
