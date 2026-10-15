@@ -3,7 +3,7 @@ module ParademPdf
     UNSET = Object.new.freeze
     private_constant :UNSET
 
-    attr_accessor :options, :cache_namespace, :origin, :deploy_version, :expires_in
+    attr_accessor :options, :cache_namespace, :origin, :cache_version, :expires_in
     attr_writer :cache
 
     def initialize

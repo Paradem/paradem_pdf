@@ -130,14 +130,15 @@ updates or force print media. See [design](docs/design.md#resource-readiness).
 ### Version 0.5 migration
 
 Configure shared defaults with `ParademPdf.configure`: `options`, `origin`, `cache`,
-`cache_namespace`, `deploy_version`, and `expires_in`. Document keywords override
+`cache_namespace`, `cache_version`, and `expires_in`. Document keywords override
 these defaults. Explicit `cache: nil` disables caching; explicit `expires_in: nil`
 disables expiry. Without a configured store, the optional Rails integration uses
 `Rails.cache`; standalone Ruby defaults to no cache.
 
 Replace `freshness` and `assets_version` with a JSON-compatible `cache_key` that
 declares all body and decoration dependencies. Include immutable code and asset
-revisions in `deploy_version`. Cached documents require a non-nil `cache_key`.
+revisions in `cache_version`. It defaults to nil; the application chooses its
+value and meaning. Cached documents require a non-nil `cache_key`.
 `body_html` accepts a String or a zero-argument callable. A completed hit returns
 validated bytes without invoking the body or decoration callbacks. Build the key
 and render from the same captured data. Changes in HTML metadata and dynamic
@@ -145,7 +146,7 @@ translations must be represented in the key; they cannot be discovered on a hit.
 
 `expires_in: nil` keeps entries until the store removes them. Stores implementing
 `paradem_pdf_metadata_support?` receive `metadata:` on writes, containing String
-keys `doc_type` and `deploy_version`. Ordinary stores retain the read/write API.
+keys `doc_type` and `cache_version`. Ordinary stores retain the read/write API.
 
 `ParademPdf.prune(version: "release", doc_type: "invoice", dry_run: true)` previews
 matching entries in the configured store. Omit `dry_run` to delete. `keys:` accepts
@@ -167,14 +168,14 @@ cached_document = ParademPdf::Document.new(
   cache: supplied_cache_store,
   cache_namespace: "my-app/invoices",
    cache_key: {"template" => "invoice-v1", "snapshot" => "invoice-42-revision-3"},
-   deploy_version: "assets-v1",
+   cache_version: "assets-v1",
   expires_in: 3600
 )
 bytes = cached_document.to_pdf
 ```
 
 Declare every body and callback dependency through `cache_key`, and immutable code
-and asset dependencies through `deploy_version`. Use JSON-compatible values with String
+and asset dependencies through `cache_version`. Use JSON-compatible values with String
 Hash keys. Render and compute freshness from the same data snapshot.
 
 Completed hits skip conversion, callbacks, and browser launch. Decorations can

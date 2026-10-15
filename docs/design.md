@@ -89,7 +89,8 @@ by default and raise in strict mode.
 The application declares every body and callback dependency through `cache_key`, using
 the same data snapshot that the callbacks capture. Completed hits skip all callbacks,
 so the gem cannot discover undeclared changes. Authorization must occur before
-using cached bytes. Immutable code and asset revisions belong in `deploy_version`.
+using cached bytes. Shared code and asset revisions can be declared through the
+optional, caller-owned `cache_version`; the gem does not assign or derive it.
 
 There is no cache lock or single-flight coordination. Concurrent cold misses
 may duplicate conversion. See [optimizations.md](optimizations.md) for reuse and

@@ -27,7 +27,7 @@ class DocumentTest < Minitest::Test
       header: decoration, footer: decoration, options: {format: "Letter"},
       body_margins: {bottom: "23mm"}, header_margins: {}, footer_margins: {bottom: "15mm"},
       cache: TestCacheStore.new, cache_namespace: "example", cache_key: {"revision" => 1},
-      deploy_version: "release-1", expires_in: 60
+      cache_version: "release-1", expires_in: 60
     )
 
     assert_respond_to document, :to_pdf
@@ -40,7 +40,7 @@ class DocumentTest < Minitest::Test
 
   def cached_document(store, **options)
     document(cache: store, cache_namespace: "example", cache_key: "snapshot-1",
-      deploy_version: "assets-1", expires_in: 60, **options)
+      cache_version: "assets-1", expires_in: 60, **options)
   end
 
   def test_completed_hit_skips_all_conversion_and_callbacks
@@ -192,7 +192,7 @@ class DocumentTest < Minitest::Test
 
   def test_completed_key_changes_for_every_declared_dimension
     changes = {doc_type: "report", origin: "https://other.example.test/", locale: "ar",
-               cache_namespace: "other", cache_key: {"revision" => 2}, deploy_version: "assets-2",
+               cache_namespace: "other", cache_key: {"revision" => 2}, cache_version: "assets-2",
                options: {format: "Letter"}, body_margins: {bottom: "20mm"},
                header_margins: {top: "1mm"}, footer_margins: {bottom: "1mm"},
                header: ->(**) { "header" }, footer: ->(**) { "footer" }}
@@ -251,7 +251,7 @@ class DocumentTest < Minitest::Test
   def test_requires_explicit_valid_cache_dependencies_before_access
     store = TestCacheStore.new
     {cache_namespace: [nil, "", " "], cache_key: [nil, Object.new, {symbol: 1}],
-     deploy_version: [Object.new], expires_in: [0, -1, Float::INFINITY]}.each do |field, values|
+     cache_version: [Object.new], expires_in: [0, -1, Float::INFINITY]}.each do |field, values|
       values.each { |value| assert_raises(ArgumentError) { cached_document(store, **{field => value}) } }
     end
     assert_raises(ArgumentError) { cached_document(Object.new) }
@@ -328,7 +328,7 @@ class DocumentTest < Minitest::Test
   end
 
   def test_complete_invalidation_reuses_only_unchanged_partial_rendering_inputs
-    changes = {deploy_version: "new assets", options: {print_background: false},
+    changes = {cache_version: "new assets", options: {print_background: false},
                footer_margins: {bottom: "17mm"}, origin: "https://other.example.test/",
                locale: "ar", doc_type: "other", cache_namespace: "other"}
     changes.each do |field, value|

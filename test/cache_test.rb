@@ -15,7 +15,7 @@ class CacheTest < Minitest::Test
 
   def inputs
     {"doc_type" => "invoice", "kind" => "footer", "namespace" => "app", "locale" => "en",
-     "page" => 1, "total_pages" => 2, "html" => "footer", "deploy_version" => "v1",
+     "page" => 1, "total_pages" => 2, "html" => "footer", "cache_version" => "v1",
      "options" => {"margin" => {"bottom" => "15mm"}}, "render_version" => "1"}
   end
 
@@ -152,7 +152,7 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] == "1"
         first = ActiveSupport::Cache::FileStore.new(directory)
         second = ActiveSupport::Cache::FileStore.new(directory)
         options = {doc_type: "report", body_html: "body", origin: "https://reports.example.test/", locale: "en",
-                   cache_namespace: "integration", cache_key: "snapshot", deploy_version: "assets", expires_in: 60,
+                   cache_namespace: "integration", cache_key: "snapshot", cache_version: "assets", expires_in: 60,
                    footer: ->(page:, total_pages:) { "footer #{page}/#{total_pages}" }}
         conversions = []
         convert_using(->(_kind, html, *) {
@@ -172,7 +172,7 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] == "1"
       Dir.mktmpdir("paradem-pdf-cache-expiry-") do |directory|
         store = ActiveSupport::Cache::FileStore.new(directory)
         options = {doc_type: "report", body_html: "body", origin: "https://reports.example.test/", locale: "en",
-                   cache: store, cache_namespace: "integration", cache_key: "snapshot", deploy_version: "assets",
+                   cache: store, cache_namespace: "integration", cache_key: "snapshot", cache_version: "assets",
                    expires_in: 0.01, footer: ->(**) { "footer" }}
         conversions = []
         convert_using(->(_kind, html, *) {

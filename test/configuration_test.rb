@@ -20,7 +20,7 @@ class ConfigurationTest < Minitest::Test
       config.cache_namespace = "app"
       config.origin = "https://configured.example.test:8443/"
       config.options = {format: "Letter", emulate_media: "print"}
-      config.deploy_version = "release-1"
+      config.cache_version = "content-schema-1"
       config.expires_in = 60
     end
     store
@@ -35,6 +35,7 @@ class ConfigurationTest < Minitest::Test
     assert_equal({}, ParademPdf.configuration.options)
     assert_nil ParademPdf.configuration.origin
     assert_nil ParademPdf.configuration.expires_in
+    assert_nil ParademPdf.configuration.cache_version
     configure
     assert_equal "app", ParademPdf.configuration.cache_namespace
   end
@@ -98,7 +99,7 @@ class ConfigurationTest < Minitest::Test
     assert_empty store.reads
   end
 
-  def test_deployment_change_invalidates_completed_and_overlay_cache
+  def test_cache_version_change_invalidates_completed_and_overlay_cache
     configure
     conversions = []
     convert_using(->(_kind, html, *) {
@@ -106,7 +107,7 @@ class ConfigurationTest < Minitest::Test
       pdf_bytes(html)
     }) do
       document(footer: ->(**) { "footer" }).to_pdf
-      ParademPdf.configuration.deploy_version = "release-2"
+      ParademPdf.configuration.cache_version = "content-schema-2"
       document(footer: ->(**) { "footer" }).to_pdf
     end
     assert_equal 4, conversions.length

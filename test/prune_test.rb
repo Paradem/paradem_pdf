@@ -28,14 +28,14 @@ class PruneTest < Minitest::Test
     ParademPdf.reset_configuration!
   end
 
-  def test_metadata_capable_store_receives_document_type_and_deployment
+  def test_metadata_capable_store_receives_document_type_and_cache_version
     store = Store.new
     convert_using(->(_kind, html, *) { pdf_bytes(html) }) do
       ParademPdf::Document.new(doc_type: "invoice", locale: "en", origin: "https://example.test/",
         body_html: "body", footer: ->(**) { "footer" }, cache: store,
-        cache_namespace: "app", cache_key: "body", deploy_version: "v1").to_pdf
+        cache_namespace: "app", cache_key: "body", cache_version: "v1").to_pdf
     end
-    assert_equal({"doc_type" => "invoice", "deploy_version" => "v1"}, store.metadata)
+    assert_equal({"doc_type" => "invoice", "cache_version" => "v1"}, store.metadata)
     assert_equal 2, store.writes.length
   end
 

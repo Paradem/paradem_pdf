@@ -25,13 +25,13 @@ The keyword signature and validation are in
 | `cache` | Configuration, then Rails default | Store with `read(key)` and `write(key, bytes, expires_in:)`; explicit nil disables caching |
 | `cache_namespace` | Configuration | Required nonblank String when caching |
 | `cache_key` | `nil` | Required non-nil caller-owned dependency value when caching |
-| `deploy_version` | Configuration | Immutable code and asset revision |
+| `cache_version` | Configuration, initially nil | Caller-owned cache revision; the gem does not choose a value or source |
 | `expires_in` | Configuration | Nil for no expiry, or finite positive Numeric seconds |
 | `concurrency` | Processor count minus one, minimum one | Positive Integer bounding overlay conversion workers; nil selects the default |
 | `readiness` | `true` | Boolean enabling the default image/font readiness policy |
 | `readiness_timeout` | `20_000` | Integer milliseconds, 1 through 2,147,483,647, validated even when readiness is disabled |
 
-Cache key and deployment values accept JSON-compatible data: Strings, Integers,
+Cache key and version values accept JSON-compatible data: Strings, Integers,
 finite Floats, booleans, nil within containers, Arrays, and Hashes with String
 keys. Cycles and unsupported objects raise. A cache key cannot be top-level nil.
 See [cache.rb](../lib/paradem_pdf/cache.rb). Applications must declare HTML metadata
@@ -133,7 +133,7 @@ store. Pruning is optional: no configured store, or a store without
 or reading, writing, or deleting entries. Supported stores retain selector validation
 and propagate store errors.
 
-A version alone selects all entries for that deployment. Supplied filters
+A version alone selects all entries for that cache version. Supplied filters
 combine with AND; multiple keys match within the list. Blank or malformed supplied
 filters raise instead of broadening the selection. Only nil omits a filter;
 false is invalid. No selectors also raises.
@@ -142,10 +142,10 @@ To support pruning, the store implements `paradem_pdf_prune` with those keywords
 `{count: Integer, versions: Array}`. A dry run does not delete. Versions can contain
 nil for unversioned entries. Stores can opt into write metadata with
 `paradem_pdf_metadata_support?`; writes then receive `metadata:` containing
-`"doc_type"` and `"deploy_version"`. Plain stores receive no additional keywords.
+`"doc_type"` and `"cache_version"`. Plain stores receive no additional keywords.
 
-Applications own prune confirmation and deployment warnings. No Active Record or
-Kamal dependency is required by the gem.
+Applications own version selection, prune confirmation and warnings. No Active
+Record or deployment-system dependency is required by the gem.
 
 ## Errors
 

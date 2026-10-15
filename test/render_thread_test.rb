@@ -101,7 +101,7 @@ class RenderThreadTest < Minitest::Test
     callbacks = []
     conversions = []
     browser = FakeBrowser.new
-    doc = document(cache: store, cache_namespace: "threads", cache_key: "v1", deploy_version: "v1", expires_in: 60,
+    doc = document(cache: store, cache_namespace: "threads", cache_key: "v1", cache_version: "v1", expires_in: 60,
       header: ->(page:, total_pages:) {
         callbacks << [Thread.current, :header, page, total_pages]
         "header#{page}"

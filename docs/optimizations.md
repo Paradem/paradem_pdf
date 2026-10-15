@@ -10,7 +10,7 @@ callbacks, or a managed browser launch. The gem still captures effective
 rendering inputs to find the key.
 
 The key includes effective render configuration, decoration presence and configuration,
-namespace, document type, locale, render version, deploy version, and explicit
+namespace, document type, locale, render version, caller-owned cache version, and explicit
 caller dependencies. Changing callback output without changing declared dependencies
 cannot invalidate a completed hit.
 

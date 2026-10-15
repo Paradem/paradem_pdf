@@ -12,7 +12,7 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] == "1"
 
     def document_options
       {doc_type: "report", body_html: "body", origin: "https://reports.example.test/", locale: "en",
-       cache_namespace: "fixture", cache_key: "snapshot-1", deploy_version: "assets-1", expires_in: 60}
+       cache_namespace: "fixture", cache_key: "snapshot-1", cache_version: "assets-1", expires_in: 60}
     end
 
     def test_default_explicit_and_nil_cache_and_all_options_are_forwarded

@@ -33,7 +33,7 @@ cache mutable CombinePDF objects or publish incomplete documents.
 Use cache `read` and `write` operations, with optional
 `paradem_pdf_metadata_support?` and `paradem_pdf_prune` capabilities. Keep page and
 total pages in decoration keys. Completed keys include a caller-owned `cache_key`
-and deploy version declaring body, callback, code and asset dependencies. Resolve
+and caller-supplied cache version declaring body, callback, code and asset dependencies. Resolve
 body HTML only after a completed miss. Keep authorization and data snapshot ownership in the caller.
 Store exceptions propagate. Strict mode rejects false or nil writes.
 
