@@ -1,7 +1,7 @@
 module ParademPdf
   module Rails
     module PrecacheScheduler
-      @state = {mutex: Mutex.new, running: false, pending: false, owner: nil}
+      @state = {mutex: Mutex.new, running: false, pending: false, owner: nil, worker: nil}
 
       def self.request(reason:)
         return :skipped if ParademPdf.configuration.precache_document_classes.empty?
@@ -10,15 +10,16 @@ module ParademPdf
         state = @state
         owner = nil
         state[:mutex].synchronize do
-          if state[:running]
+          if state[:running] && state[:worker]&.alive?
             state[:pending] = true
             return :pending
           end
 
           owner = Object.new
           state[:running] = true
+          state[:pending] = false
           state[:owner] = owner
-          Thread.new { work(state, owner, reason) }
+          state[:worker] = Thread.new { work(state, owner, reason) }
           :started
         end
       rescue => error
@@ -37,6 +38,7 @@ module ParademPdf
             else
               state[:running] = false
               state[:owner] = nil
+              state[:worker] = nil
               false
             end
           end
@@ -52,6 +54,7 @@ module ParademPdf
             state[:running] = false
             state[:pending] = false
             state[:owner] = nil
+            state[:worker] = nil
           end
         end
       end

@@ -27,7 +27,7 @@ module ParademPdf
           }
             raise PrecacheConfigurationError, "Entries must be document keyword Hashes"
           end
-          [name, klass, entries]
+          [name, klass, entries.map(&:dup)]
         end
         return Result.new(attempted: 0, succeeded: 0, failed: 0) if batches.all? { |_, _, entries| entries.empty? }
 

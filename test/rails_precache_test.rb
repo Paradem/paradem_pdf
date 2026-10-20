@@ -11,6 +11,7 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] != "1"
 else
   require "paradem_pdf/rails"
   require "support/precache_documents"
+  require "timeout"
 
   class FixtureUnconfiguredPdf
     def self.precache_entries
@@ -264,6 +265,39 @@ else
           assert_equal 3, ParademPdf::Rails.precache.attempted
         end
       end
+    end
+
+    def test_materialized_entries_ignore_source_array_and_keyword_hash_mutation
+      ParademPdf.configuration.precache_document_classes = ["FixtureGuidePdf"]
+      second = {label: "second guide"}
+      entries = [{label: "first guide"}, second]
+      FixtureGuidePdf.entries = entries
+      entered = Queue.new
+      release = Queue.new
+      conversions = []
+      worker = nil
+      convert_using(->(_kind, html, *) {
+        conversions << html
+        if html == "first guide"
+          entered << true
+          Timeout.timeout(5) { release.pop }
+        end
+        pdf_bytes(html)
+      }) do
+        worker = Thread.new { ParademPdf::Rails.precache }
+        Timeout.timeout(5) { entered.pop }
+        entries.clear
+        second[:label] = "changed guide"
+        release << true
+        assert_equal worker, worker.join(5)
+        result = worker.value
+        assert_equal [2, 2, 0], [result.attempted, result.succeeded, result.failed]
+        assert_equal ["first guide", "second guide"], conversions
+        assert_equal 0, ParademPdf::Rails.precache.attempted
+      end
+    ensure
+      worker&.kill if worker&.alive?
+      worker&.join(5)
     end
   end
 end

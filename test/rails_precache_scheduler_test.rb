@@ -314,5 +314,31 @@ else
         end
       end
     end
+
+    def test_worker_killed_before_entering_work_does_not_wedge_admission
+      ParademPdf.configuration.precache_document_classes = ["FixtureGuidePdf"]
+      factory = Thread.method(:new)
+      gate = Queue.new
+      Thread.stub(:new, ->(&work) {
+        worker = factory.call do
+          gate.pop
+          work.call
+        end
+        @workers << worker
+        worker.kill
+        assert_equal worker, worker.join(5)
+        worker
+      }) do
+        assert_equal :started, ParademPdf::Rails.precache_later
+      end
+      with_workers do
+        ParademPdf::Rails.stub(:precache, blocking_pass) do
+          assert_equal :started, ParademPdf::Rails.precache_later
+          worker = take(@entered)
+          @release << true
+          assert_equal worker, worker.join(5)
+        end
+      end
+    end
   end
 end
