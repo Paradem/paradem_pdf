@@ -30,7 +30,8 @@ class BootstrapTest < Minitest::Test
     %w[LICENSE README.md docs/architecture.md docs/design.md docs/optimizations.md
       docs/development.md docs/browser-check.md docs/api-reference.md
       docs/troubleshooting.md lib/paradem_pdf/browser.js lib/paradem_pdf/readiness.js
-      lib/paradem_pdf/worker_context.cjs].each do |path|
+      lib/paradem_pdf/worker_context.cjs docs/precaching.md
+      lib/paradem_pdf/rails/precacheable.rb lib/paradem_pdf/rails/precache.rb].each do |path|
       assert_includes spec.files, path
     end
     refute spec.files.any? { |path| path.match?(%r{\A(?:test/|node_modules/|\.cache/)|\.(?:pdf|ttf|otf)\z}) }

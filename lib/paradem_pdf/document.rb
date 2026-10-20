@@ -90,6 +90,8 @@ module ParademPdf
     end
 
     def to_pdf(browser: nil, require_cache_write: false)
+      raise ArgumentError, "Strict rendering requires a cache" if require_cache_write && !@cache
+
       owned = nil
       if @cache
         key = @cache.key(inputs: completed_inputs)

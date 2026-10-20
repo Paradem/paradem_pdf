@@ -6,4 +6,6 @@ module ParademPdf
   class CacheWriteFailed < Error; end
 
   class BrowserError < Error; end
+
+  class PrecacheConfigurationError < Error; end
 end
