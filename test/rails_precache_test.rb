@@ -10,29 +10,7 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] != "1"
   end
 else
   require "paradem_pdf/rails"
-  require "support/cache_store"
-
-  class FixturePdf
-    include ParademPdf::Rails::Precacheable if defined?(ParademPdf::Rails::Precacheable)
-
-    class << self
-      attr_accessor :entries, :calls, :document_options
-    end
-
-    def self.precache_entries
-      entries
-    end
-
-    def to_pdf(label:, browser: nil, require_cache_write: false)
-      self.class.calls << [label, browser, require_cache_write]
-      ParademPdf::Document.new(doc_type: self.class.name, locale: "en",
-        body_html: label, cache_key: label, **self.class.document_options).to_pdf(browser: browser, require_cache_write: require_cache_write)
-    end
-  end
-
-  class FixtureGuidePdf < FixturePdf; end
-  class FixtureReceiptPdf < FixturePdf; end
-  FixtureGuideAliasPdf = FixtureGuidePdf
+  require "support/precache_documents"
 
   class FixtureUnconfiguredPdf
     def self.precache_entries
@@ -270,6 +248,21 @@ else
     def test_lifecycle_failures_are_normalized_at_the_public_boundary
       ::Rails.application.reloader.stub(:wrap, -> { raise "private lifecycle path" }) do
         assert_infrastructure { ParademPdf::Rails.precache }
+      end
+    end
+
+    def test_configured_names_are_snapshotted_before_enumerating_entries
+      names = ["FixtureGuidePdf"]
+      ParademPdf.configuration.precache_document_classes = names
+      entries = FixtureGuidePdf.method(:precache_entries)
+      FixtureGuidePdf.stub(:precache_entries, -> {
+        names << "FixtureReceiptPdf" if names.length == 1
+        entries.call
+      }) do
+        convert_using(->(_kind, html, *) { pdf_bytes(html) }) do
+          assert_equal 2, ParademPdf::Rails.precache.attempted
+          assert_equal 3, ParademPdf::Rails.precache.attempted
+        end
       end
     end
   end

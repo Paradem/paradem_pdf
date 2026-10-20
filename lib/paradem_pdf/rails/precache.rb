@@ -15,7 +15,7 @@ module ParademPdf
         unless (names - configured).empty?
           raise PrecacheConfigurationError, "Selection must be configured"
         end
-        batches = names.map do |name|
+        batches = names.dup.map do |name|
           klass = name.constantize
           unless klass.is_a?(Class) && klass.include?(Precacheable) && klass.method_defined?(:to_pdf)
             raise PrecacheConfigurationError, "Document must implement the precaching protocol"

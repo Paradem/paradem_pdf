@@ -2,9 +2,14 @@ require "paradem_pdf"
 require "paradem_pdf/rails_renderer"
 require "paradem_pdf/rails/precacheable"
 require "paradem_pdf/rails/precache"
+require "paradem_pdf/rails/precache_scheduler"
 
 module ParademPdf
   module Rails
+    def self.precache_later(reason: :manual)
+      PrecacheScheduler.request(reason: reason)
+    end
+
     def self.precache(documents: nil, on_warning: nil)
       ::Rails.application.reloader.wrap do
         Precache.call(documents: documents, on_warning: on_warning)
