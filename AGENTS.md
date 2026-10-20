@@ -14,6 +14,9 @@ outside the gem. Optional Rails integration must not affect core loading.
 - Reuse Grover and CombinePDF. Do not add custom cache stores, locks,
   schedulers, model integrations, or dependencies without a concrete need. A
   managed browser is an approved concrete need, owned by `ParademPdf::Browser`.
+- Story 8 approves the opt-in in-process scheduler under `paradem_pdf/rails`.
+  Keep application event subscriptions and model policy outside the gem. This
+  approval does not permit durable queues, cross-process locks, or retries.
 - Keep version-dependent Grover normalization and private calls in
   `GroverRenderer`. Capture native effective options once for both fingerprints
   and conversion. Review this boundary when updating Grover.

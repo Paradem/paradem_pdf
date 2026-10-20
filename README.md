@@ -193,6 +193,9 @@ False or nil writes are best-effort by default. Use
 Store exceptions propagate. See [optimizations](docs/optimizations.md) and the
 [API reference](docs/api-reference.md).
 
+Strict rendering requires an effective cache store and rejects disabled caching
+before resolving HTML or launching a browser.
+
 ## Parallel rendering
 
 The body renders first to learn the page count. Header/footer conversion misses
@@ -234,6 +237,12 @@ When `cache` is omitted, both `Document.new` and `Rails.document` use the config
 store, defaulting to `Rails.cache`; supply all required cache inputs. Explicit
 `cache: nil` disables caching. The gem installs no engine,
 routes, migrations, or initializer. See the [API reference](docs/api-reference.md).
+
+For shared warming, configure `precache_document_classes` with class-name Strings
+and include `ParademPdf::Rails::Precacheable` in each type. Use
+`ParademPdf::Rails.precache` synchronously or `.precache_later` for best-effort
+in-process execution. See [precaching](docs/precaching.md) for the entry contract,
+extension example, failures, and full-pass coalescing limits.
 
 ## Images
 

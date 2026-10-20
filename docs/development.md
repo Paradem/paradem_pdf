@@ -18,7 +18,7 @@ Human-facing prose is reviewed against code and tested examples rather than
 assertions on its exact wording. See [AGENTS.md](../AGENTS.md) for repository
 workflow and commit rules.
 
-## Implementation readability
+## Story 6 implementation readability
 
 Story 6 is a behavior-preserving refactor against baseline `6c4f620`. Use the
 existing regression tests unchanged. Do not add failing behavior tests for this
@@ -63,6 +63,11 @@ rerun core tests and lint. Baseline Rails and browser results can be reused only
 while implementation, tests, dependencies, and environment remain unchanged.
 
 ## Standalone core
+
+Story 8 adds opt-in Rails precaching under the normal TDD workflow. Story 6's
+unchanged-tests and behavior-preservation restrictions apply only to story 6.
+The optional scheduler is approved in [AGENTS.md](../AGENTS.md). Do not bump the
+version during this work. The version bump follows the user's merge.
 
 The root [Gemfile](../Gemfile) does not depend on Rails. Run the full root suite
 to check the core; optional Rails and real-browser cases report skips when not
