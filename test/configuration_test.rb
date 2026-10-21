@@ -40,6 +40,16 @@ class ConfigurationTest < Minitest::Test
     assert_equal "app", ParademPdf.configuration.cache_namespace
   end
 
+  def test_precache_allowlist_defaults_and_reset_are_isolated
+    config = ParademPdf.configuration
+    assert_respond_to config, :precache_document_classes
+    assert_equal [], config.precache_document_classes
+    config.precache_document_classes << "FixtureGuidePdf"
+    ParademPdf.reset_configuration!
+    assert_equal [], ParademPdf.configuration.precache_document_classes
+    assert_equal ["FixtureGuidePdf"], config.precache_document_classes
+  end
+
   def test_completed_hit_never_resolves_body_or_footer_and_uses_configured_options
     store = configure
     body_calls = 0

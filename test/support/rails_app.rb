@@ -1,9 +1,9 @@
 require "test_helper"
 
 module RailsSubprocess
-  def run_rails_test(file)
+  def run_rails_test(file, env: {})
     skip "Optional Rails integration requires the actionpack compatibility bundle" unless Gem::Specification.find_all_by_name("actionpack").any?
-    output, errors, status = Open3.capture3({"PARADEM_PDF_RAILS_SUBPROCESS" => "1"},
+    output, errors, status = Open3.capture3({"PARADEM_PDF_RAILS_SUBPROCESS" => "1"}.merge(env),
       RbConfig.ruby, "-I", File.expand_path("../../lib", __dir__), "-I", File.expand_path("..", __dir__), file)
     assert status.success?, "#{output}\n#{errors}"
     assert_match(/0 failures, 0 errors, 0 skips/, output)
@@ -25,6 +25,10 @@ if ENV["PARADEM_PDF_RAILS_SUBPROCESS"] == "1"
 
     class Application < ::Rails::Application
       config.eager_load = false
+      if ENV["PARADEM_PDF_RELOAD_DIRECTORY"]
+        config.enable_reloading = true
+        config.autoload_paths << ENV.fetch("PARADEM_PDF_RELOAD_DIRECTORY")
+      end
       config.secret_key_base = "fixture-only-secret"
       config.logger = Logger.new(nil)
       config.cache_store = :file_store, CACHE_DIRECTORY

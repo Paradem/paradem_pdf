@@ -193,6 +193,9 @@ False or nil writes are best-effort by default. Use
 Store exceptions propagate. See [optimizations](docs/optimizations.md) and the
 [API reference](docs/api-reference.md).
 
+Strict rendering requires an effective cache store and rejects disabled caching
+before resolving HTML or launching a browser.
+
 ## Parallel rendering
 
 The body renders first to learn the page count. Header/footer conversion misses
@@ -234,6 +237,85 @@ When `cache` is omitted, both `Document.new` and `Rails.document` use the config
 store, defaulting to `Rails.cache`; supply all required cache inputs. Explicit
 `cache: nil` disables caching. The gem installs no engine,
 routes, migrations, or initializer. See the [API reference](docs/api-reference.md).
+
+### Precache document types
+
+Precaching calls your document's normal rendering path before a download needs it.
+Configure the allowed class names during boot, without loading the classes or
+querying records. For example, in `config/initializers/paradem_pdf.rb`:
+
+```ruby
+require "paradem_pdf/rails"
+
+ParademPdf.configure do |config|
+  config.origin = "https://documents.example.test/" # Replace with your asset origin.
+  config.cache = Rails.cache
+  config.cache_version = "receipt-template-v1" # Change when code or assets change.
+  config.precache_document_classes = %w[ReceiptPdf]
+end
+```
+
+Include `Precacheable` in an application class and enumerate its inputs. Each
+Symbol-keyed Hash becomes keyword arguments to a fresh instance's `to_pdf`:
+
+```ruby
+# app/lib/receipt_pdf.rb, or another Rails-autoloaded directory
+class ReceiptPdf
+  include ParademPdf::Rails::Precacheable
+
+  def self.precache_entries
+    [{locale: "en"}, {locale: "fr"}]
+  end
+
+  def to_pdf(locale:, browser: nil, require_cache_write: false)
+    ParademPdf::Rails.document(
+      doc_type: "receipt", locale: locale,
+      body_html: "<html><body>Receipt</body></html>",
+      cache_key: {"template" => "receipt-v1"}
+    ).to_pdf(browser: browser, require_cache_write: require_cache_write)
+  end
+end
+```
+
+Replace the fixed HTML with your application's rendering. Include every content
+dependency in `cache_key` and render from the same captured data. If rendering
+uses translations, scope the locale in your wrapper; the gem does not set it.
+Forward both control keywords through the same path ordinary downloads use.
+Do not put `browser` or `require_cache_write` in the entry Hashes.
+
+Run synchronously from a Rails console, runner, or an application-owned rake task:
+
+```ruby
+result = ParademPdf::Rails.precache
+result.succeeded # Number of successful document attempts.
+result.failed    # Number of failed document attempts.
+
+# Optionally select configured types and print their logged document warnings.
+ParademPdf::Rails.precache(documents: ["ReceiptPdf"], on_warning: ->(warning) { puts warning })
+
+# Ordinary downloads use the same cache entries.
+bytes = ReceiptPdf.new.to_pdf(locale: "en")
+```
+
+Entries run serially through one shared browser with `require_cache_write: true`.
+Configure an effective cache store whose writes report success. Document failures
+are counted and later entries continue. Infrastructure failures raise
+`ParademPdf::Rails::Precache::InfrastructureError` with sanitized diagnostics.
+
+For asynchronous warming after a committed change, call:
+
+```ruby
+ParademPdf::Rails.precache_later(reason: :content_changed)
+```
+
+This schedules all configured types, returns without rendering on the calling
+thread, and coalesces busy submissions into one follow-up pass. It is process-local
+and best-effort: restarts can lose work and different processes can warm concurrently.
+Normal downloads still render on a cache miss. The gem installs no event subscriber,
+model callback, rake task, or deployment hook. Applications own those triggers and
+may use `.precache_affected_by?(event, payload)` to decide when to schedule a pass.
+See the [precaching guide](docs/precaching.md) for event integration, return statuses,
+and failure details. Additional types need only their class and another configured name.
 
 ## Images
 
@@ -353,6 +435,7 @@ See [development](docs/development.md) for separate Rails compatibility checks.
 - [Development](docs/development.md)
 - [Browser checks](docs/browser-check.md)
 - [API reference](docs/api-reference.md)
+- [Precaching](docs/precaching.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
 These guides link to implementation and tests rather than copying internal code.

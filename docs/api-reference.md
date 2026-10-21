@@ -61,8 +61,9 @@ it to the application's response or storage layer.
 
 Without a supplied browser or an explicit Grover endpoint, the render lazily
 opens one managed browser and closes it on success or error. A completed hit
-does not launch a browser. Strict writes do not force writes on hits and have
-no effect when caching is disabled. Store exceptions propagate in both modes.
+does not launch a browser. Strict writes do not force writes on hits. Requiring
+writes without an effective cache raises `ArgumentError` before HTML or Chrome.
+Store exceptions propagate in both modes.
 
 Source: `to_pdf` in [document.rb](../lib/paradem_pdf/document.rb).
 Checks: [document_test.rb](../test/document_test.rb).
@@ -123,6 +124,24 @@ The adapter requires an initialized Rails environment to use its default cache.
 
 Source and checks: [rails.rb](../lib/paradem_pdf/rails.rb),
 [rails_test.rb](../test/rails_test.rb).
+
+## Rails precaching
+
+`Configuration#precache_document_classes` defaults to an independent empty Array
+of class-name Strings. Each type includes `ParademPdf::Rails::Precacheable` and
+implements `.precache_entries` and instance `#to_pdf(browser:, require_cache_write:,
+**document_inputs)`. Explicit document keyword signatures are supported.
+`.precache_affected_by?(event, payload)` defaults to false and is app-owned policy.
+
+`ParademPdf::Rails.precache(documents: nil, on_warning: nil)` runs configured types
+or a configured subset. It returns `Precache::Result(attempted:, succeeded:,
+failed:)`. Infrastructure failures, including internal `PrecacheConfigurationError`
+and `BrowserError`, become `Precache::InfrastructureError` with a sanitized
+diagnostic and nil cause. Document failures warn and continue.
+
+`ParademPdf::Rails.precache_later(reason: :manual)` schedules all configured types
+and returns `:started`, `:pending`, `:failed`, or `:skipped`. One worker and one
+pending complete pass are allowed per process. See [precaching](precaching.md).
 
 ## Selective pruning
 

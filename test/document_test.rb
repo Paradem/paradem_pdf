@@ -43,6 +43,26 @@ class DocumentTest < Minitest::Test
       cache_version: "assets-1", expires_in: 60, **options)
   end
 
+  def test_strict_render_rejects_effective_nil_cache_before_html_or_browser
+    ParademPdf.configuration.cache = TestCacheStore.new
+    calls = []
+    built = document(cache: nil, body_html: -> {
+      calls << :html
+      "body"
+    })
+    convert_using(->(_kind, html, *) {
+      calls << :conversion
+      pdf_bytes(html)
+    }) do
+      assert_raises(ArgumentError) { built.to_pdf(require_cache_write: true) }
+      assert_empty calls
+      assert built.to_pdf.start_with?("%PDF-")
+      assert_equal [:html, :conversion], calls
+    end
+  ensure
+    ParademPdf.reset_configuration!
+  end
+
   def test_completed_hit_skips_all_conversion_and_callbacks
     store = TestCacheStore.new
     callbacks = []
